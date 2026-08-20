@@ -41,6 +41,9 @@ SMTP_PASSWORD = "".join(os.getenv("SMTP_PASSWORD", "").split())
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME).strip()
 SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "true").lower() in {"1", "true", "yes", "on"}
 SMTP_SSL = os.getenv("SMTP_SSL", "false").lower() in {"1", "true", "yes", "on"}
+ADMIN_NOTIFICATION_EMAIL = os.getenv(
+    "ADMIN_NOTIFICATION_EMAIL", SUPERADMIN_EMAIL or SMTP_USERNAME
+).strip()
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:5173").rstrip("/")
 DB_PATH = Path(os.getenv("DATABASE_PATH", Path(__file__).resolve().parent.parent / "alocine.db"))
 
@@ -330,7 +333,7 @@ async def access_status() -> dict[str, bool]:
 
 
 @app.post("/api/access/request")
-async def request_access(body: AccessRequestBody) -> dict[str, str]:
+async def request_access(body: AccessRequestBody) -> dict[str, Any]:
     email = body.email.strip().casefold()
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Adresse email invalide")
@@ -339,7 +342,20 @@ async def request_access(body: AccessRequestBody) -> dict[str, str]:
         if existing and existing["status"] == "pending":
             raise HTTPException(status_code=409, detail="Une demande est déjà en attente pour cette adresse")
         connection.execute("INSERT INTO access_requests(email,message,referral_code,status,created_at) VALUES(?,?,?,?,?)", (email, body.message.strip(), body.referral_code.strip(), "pending", int(time.time())))
-    return {"status": "pending"}
+    mail_sent = False
+    try:
+        await asyncio.to_thread(
+            send_access_request_emails,
+            email,
+            body.message.strip(),
+            body.referral_code.strip(),
+        )
+        mail_sent = True
+        print(f"Access request emails sent for {email}")
+    except Exception as exc:
+        # A temporary mail outage must not discard the access request.
+        print(f"Access request email failed for {email}: {type(exc).__name__}: {exc}")
+    return {"status": "pending", "mail_sent": mail_sent}
 
 
 @app.get("/api/admin/access")
@@ -353,6 +369,80 @@ async def admin_access(_: dict[str, Any] = Depends(superadmin)) -> dict[str, Any
 
 def new_invitation_code() -> str:
     return "KNOCK-" + secrets.token_hex(4).upper()
+
+
+def smtp_send_messages(messages: list[EmailMessage]) -> None:
+    if not all((SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM)):
+        raise RuntimeError("SMTP non configuré sur le serveur")
+    context = ssl.create_default_context()
+    if SMTP_SSL:
+        smtp_context = smtplib.SMTP_SSL(
+            SMTP_HOST, SMTP_PORT, timeout=20, context=context
+        )
+    else:
+        smtp_context = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+    with smtp_context as smtp:
+        smtp.ehlo()
+        if SMTP_STARTTLS and not SMTP_SSL:
+            smtp.starttls(context=context)
+            smtp.ehlo()
+        smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        for message in messages:
+            smtp.send_message(message)
+
+
+def send_access_request_emails(
+    recipient: str, request_message: str, referral_code: str
+) -> None:
+    messages: list[EmailMessage] = []
+    confirmation = EmailMessage()
+    confirmation["Subject"] = "Votre demande est arrivée au Ministère"
+    confirmation["From"] = SMTP_FROM
+    confirmation["To"] = recipient
+    confirmation.set_content(
+        "Votre demande d'accès à Knockturn Alley a bien été reçue. "
+        "Un hibou vous apportera votre invitation après sa validation."
+    )
+    confirmation.add_alternative(
+        """
+        <!doctype html><html lang="fr"><body style="margin:0;background:#09070b;color:#f8f3fa;font-family:Arial,sans-serif">
+          <div style="max-width:600px;margin:auto;padding:42px 22px"><div style="border:1px solid #d7a55855;border-radius:24px;padding:38px;background:#151018">
+            <p style="color:#d7a558;font-size:11px;letter-spacing:4px;text-align:center">MINISTÈRE DES PASSAGES MAGIQUES</p>
+            <h1>Votre parchemin est bien arrivé ✦</h1>
+            <p style="color:#b9afb9;line-height:1.7">Votre demande d’accès à Knockturn Alley attend désormais la validation du Ministère. Un nouveau hibou vous apportera votre formule magique dès son approbation.</p>
+          </div></div>
+        </body></html>
+        """,
+        subtype="html",
+    )
+    messages.append(confirmation)
+
+    if ADMIN_NOTIFICATION_EMAIL:
+        admin_message = EmailMessage()
+        admin_message["Subject"] = f"Nouvelle demande d'accès : {recipient}"
+        admin_message["From"] = SMTP_FROM
+        admin_message["To"] = ADMIN_NOTIFICATION_EMAIL
+        admin_message.set_content(
+            f"Nouvelle demande de {recipient}\n\nMessage : {request_message or 'Aucun'}\n"
+            f"Parrainage : {referral_code or 'Aucun'}\n\nAdministration : {PUBLIC_URL}"
+        )
+        admin_message.add_alternative(
+            f"""
+            <!doctype html><html lang="fr"><body style="margin:0;background:#09070b;color:#f8f3fa;font-family:Arial,sans-serif">
+              <div style="max-width:600px;margin:auto;padding:42px 22px"><div style="border:1px solid #d7a55855;border-radius:24px;padding:38px;background:#151018">
+                <p style="color:#d7a558;font-size:11px;letter-spacing:4px">NOUVEAU PARCHEMIN</p>
+                <h1>Quelqu’un frappe à la porte</h1>
+                <p><strong>{html.escape(recipient)}</strong></p>
+                <p style="color:#b9afb9;line-height:1.7">{html.escape(request_message or 'Aucun message')}</p>
+                <p style="color:#8d838e">Parrainage : {html.escape(referral_code or 'Aucun')}</p>
+                <a href="{html.escape(PUBLIC_URL, quote=True)}" style="display:block;margin-top:24px;padding:15px;border-radius:12px;background:#d978ff;color:#280035;font-weight:bold;text-align:center;text-decoration:none">Ouvrir le registre</a>
+              </div></div>
+            </body></html>
+            """,
+            subtype="html",
+        )
+        messages.append(admin_message)
+    smtp_send_messages(messages)
 
 
 def send_invitation_email(recipient: str, code: str, expires_at: int) -> None:
@@ -396,19 +486,7 @@ def send_invitation_email(recipient: str, code: str, expires_at: int) -> None:
         subtype="html",
     )
 
-    context = ssl.create_default_context()
-    if SMTP_SSL:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20, context=context) as smtp:
-            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(message)
-    else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
-            smtp.ehlo()
-            if SMTP_STARTTLS:
-                smtp.starttls(context=context)
-                smtp.ehlo()
-            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-            smtp.send_message(message)
+    smtp_send_messages([message])
 
 
 async def invitation_delivery(invitation: dict[str, Any]) -> dict[str, Any]:
