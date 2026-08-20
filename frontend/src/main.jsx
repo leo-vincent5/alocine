@@ -392,49 +392,24 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     skipAutoRef.current = false;
     const controller = new AbortController();
     let networkRetries = 0;
-    const temporaryManifests = [];
-    const resolvePlaybackUrl = async () => {
+    const temporaryManifests = [],
+      sourceName = String(item?.sourceName || ""),
+      advertisedQuality =
+        sourceName.match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
+        (/\/hd\/master\.m3u8/i.test(url) ? "1080" : "720"),
+      renditionCandidates = [
+        ...new Set([advertisedQuality, "1080", "720", "480"]),
+      ];
+    let renditionIndex = 0;
+    const resolvePlaybackUrl = async (forcedQuality = null) => {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
       if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
-        const sourceName = String(item?.sourceName || ""),
-          advertisedQuality =
-            sourceName.match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
-            (/\/hd\/master\.m3u8/i.test(url) ? "1080" : "720"),
-          candidates = [
-            ...new Set([advertisedQuality, "1080", "720", "480"]),
-          ];
-        let quality = advertisedQuality,
+        const quality = forcedQuality || advertisedQuality,
           videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href;
 
-        // Purstream's quality label is sometimes stale. Probe only the child
-        // playlists (the master itself is blocked) and keep the first one that
-        // really exists. A 429 also proves the path exists, so do not fall back
-        // to a lower and unrelated rendition in that case.
-        for (const candidate of candidates) {
-          const candidateUrl = new URL(
-            `${candidate}p/playlist.m3u8`,
-            url,
-          ).href;
-          try {
-            const response = await fetch(candidateUrl, {
-              signal: controller.signal,
-              mode: "cors",
-              credentials: "omit",
-              cache: "no-store",
-              referrerPolicy: "no-referrer",
-            });
-            if (response.ok || response.status === 429) {
-              quality = candidate;
-              videoPlaylist = candidateUrl;
-              break;
-            }
-          } catch (reason) {
-            if (reason?.name === "AbortError") throw reason;
-          }
-        }
-
         // Cloudflare blocks master.m3u8 while allowing its child playlists.
-        // Never request the master: use the child playlist verified above.
+        // Never request or preflight the master/child playlist: hls.js performs
+        // the single playback request and handles a 404 fallback below.
         if (/\bMULTI\b/i.test(sourceName)) setManifestLanguages(["fr", "vo"]);
         if (audioLanguage === "fr") return videoPlaylist;
 
@@ -464,6 +439,11 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         temporaryManifests.push(manifestUrl);
         return manifestUrl;
       }
+      // It is already a final media playlist. Do not pre-fetch it: an extra
+      // Fetch/XHR request can trigger Cloudflare before hls.js starts playback.
+      return url;
+      /* Legacy parser kept unreachable for the moment; master manifests are
+         deliberately bypassed above because the CDN rejects them. */
       try {
         const response = await fetch(url, {
           signal: controller.signal,
@@ -740,6 +720,26 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         if (!data.fatal) return;
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
           const status = data.response?.code || data.response?.status;
+          if (
+            Number(status) === 404 &&
+            /\/master\.m3u8(?:\?.*)?$/i.test(url) &&
+            renditionIndex < renditionCandidates.length - 1
+          ) {
+            renditionIndex += 1;
+            networkRetries = 0;
+            setError(
+              `Qualité indisponible, tentative en ${renditionCandidates[renditionIndex]}p…`,
+            );
+            resolvePlaybackUrl(renditionCandidates[renditionIndex]).then(
+              (fallbackUrl) => {
+                if (!controller.signal.aborted && hlsRef.current === hls) {
+                  setError("");
+                  hls.loadSource(fallbackUrl);
+                }
+              },
+            );
+            return;
+          }
           const limited = Number(status) === 429;
           if (limited) {
             clearTimeout(retryRef.current);
