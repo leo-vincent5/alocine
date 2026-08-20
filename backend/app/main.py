@@ -21,6 +21,9 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 PURSTREAM_URL = os.getenv(
     "PURSTREAM_URL", "https://api.purstream.art/api/v1/catalog/movies"
