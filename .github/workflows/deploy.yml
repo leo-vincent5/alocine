@@ -30,6 +30,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: ""
+          VITE_PURSTREAM_API: "https://api.purstream.store/api/v1"
         run: npm run build
 
       - name: Déployer le frontend
