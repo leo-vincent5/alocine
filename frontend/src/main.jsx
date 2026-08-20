@@ -455,6 +455,25 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
             );
             const selectedVariant = variants[0];
             if (selectedVariant && selectedAudio) {
+              const codecs =
+                  selectedVariant.info.match(/CODECS="([^"]+)"/i)?.[1] || "",
+                usesHevc = /\b(hvc1|hev1)\b/i.test(codecs),
+                hevcCodec = codecs
+                  .split(",")
+                  .map((codec) => codec.trim())
+                  .find((codec) => /^(hvc1|hev1)/i.test(codec)),
+                hevcSupported =
+                  !usesHevc ||
+                  (hevcCodec &&
+                    window.MediaSource?.isTypeSupported(
+                      `video/mp4; codecs="${hevcCodec}"`,
+                    ));
+              if (!hevcSupported) {
+                setError(
+                  "Cette source est encodée en HEVC (hvc1), un format que ce navigateur ne sait pas décoder. Essayez Safari sur iPhone/Mac ou un navigateur Windows disposant du codec HEVC.",
+                );
+                return null;
+              }
               const absoluteAudio = selectedAudio
                   .replace(/DEFAULT=(YES|NO)/i, "DEFAULT=YES")
                   .replace(/AUTOSELECT=(YES|NO)/i, "AUTOSELECT=YES")
@@ -748,7 +767,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       !(audioLanguage === "vo" && Hls.isSupported())
     ) {
       resolvePlaybackUrl().then((playbackUrl) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || !playbackUrl) return;
         video.src = playbackUrl;
         video.load();
         tryPlay();
@@ -773,7 +792,11 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       hlsRef.current = hls;
       hls.on(Hls.Events.MEDIA_ATTACHED, async () => {
         const playbackUrl = await resolvePlaybackUrl();
-        if (!controller.signal.aborted && hlsRef.current === hls)
+        if (
+          playbackUrl &&
+          !controller.signal.aborted &&
+          hlsRef.current === hls
+        )
           hls.loadSource(playbackUrl);
       });
       hls.on(Hls.Events.MANIFEST_PARSED, tryPlay);
