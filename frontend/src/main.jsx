@@ -1580,7 +1580,10 @@ function AuthModal({ onClose, onAuthenticated }) {
 }
 
 function AccessGate({ onAuthenticated }) {
-  const [mode, setMode] = useState("request"),
+  const invitationParams = new URLSearchParams(window.location.search),
+    invitationCode = invitationParams.get("invite") || "",
+    invitationEmail = invitationParams.get("email") || "",
+    [mode, setMode] = useState(invitationCode ? "register" : "request"),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -1664,7 +1667,12 @@ function AccessGate({ onAuthenticated }) {
           )}
           <label>
             Adresse email
-            <input name="email" type="email" required />
+            <input
+              name="email"
+              type="email"
+              defaultValue={invitationEmail}
+              required
+            />
           </label>
           {mode === "request" ? (
             <>
@@ -1695,6 +1703,7 @@ function AccessGate({ onAuthenticated }) {
                   Code d’invitation
                   <input
                     name="invite_code"
+                    defaultValue={invitationCode}
                     required
                     placeholder="KNOCK-XXXXXXXX"
                   />
@@ -1741,7 +1750,8 @@ function AdminPanel({ onClose }) {
     }),
     [tab, setTab] = useState("requests"),
     [error, setError] = useState(""),
-    [created, setCreated] = useState("");
+    [created, setCreated] = useState(""),
+    [mailNotice, setMailNotice] = useState("");
   const token = localStorage.getItem("alocine_token"),
     headers = { Authorization: `Bearer ${token}` };
   const load = () =>
@@ -1755,6 +1765,7 @@ function AdminPanel({ onClose }) {
   useEffect(load, []);
   const action = async (url, options = {}) => {
     setError("");
+    setMailNotice("");
     const response = await fetch(`${API}${url}`, {
         ...options,
         headers: { ...headers, ...options.headers },
@@ -1764,7 +1775,17 @@ function AdminPanel({ onClose }) {
       setError(value.detail || "Action impossible");
       return;
     }
-    if (value.invitation) setCreated(value.invitation.code);
+    if (value.invitation) {
+      setCreated(value.invitation.code);
+      setMailNotice(
+        value.mail_sent
+          ? `Le hibou a bien été envoyé à ${value.invitation.email}.`
+          : value.mail_error ||
+              (value.invitation.email
+                ? "Le code est prêt, mais aucun hibou n’a été envoyé."
+                : "Code sans destinataire : transmettez-le manuellement."),
+      );
+    }
     load();
   };
   const create = (event) => {
@@ -1809,6 +1830,7 @@ function AdminPanel({ onClose }) {
         ))}
       </nav>
       {error && <div className="admin-error">{error}</div>}
+      {mailNotice && <div className="created-code">{mailNotice}</div>}
       {created && (
         <div className="created-code">
           Code créé : <strong>{created}</strong>

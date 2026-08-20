@@ -1,13 +1,18 @@
+import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import json
 import os
 import random
 import re
 import secrets
+import smtplib
 import sqlite3
+import ssl
 import time
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote, urljoin, urlparse
@@ -24,6 +29,14 @@ TIMEOUT_SECONDS = float(os.getenv("UPSTREAM_TIMEOUT", "20"))
 AUTH_SECRET = os.getenv("AUTH_SECRET", "change-this-development-secret")
 INVITE_ONLY = os.getenv("INVITE_ONLY", "true").lower() in {"1", "true", "yes", "on"}
 SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "").strip().casefold()
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME).strip()
+SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "true").lower() in {"1", "true", "yes", "on"}
+SMTP_SSL = os.getenv("SMTP_SSL", "false").lower() in {"1", "true", "yes", "on"}
+PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:5173").rstrip("/")
 DB_PATH = Path(os.getenv("DATABASE_PATH", Path(__file__).resolve().parent.parent / "alocine.db"))
 
 app = FastAPI(title="Alocine API", version="0.1.0")
@@ -337,6 +350,80 @@ def new_invitation_code() -> str:
     return "KNOCK-" + secrets.token_hex(4).upper()
 
 
+def send_invitation_email(recipient: str, code: str, expires_at: int) -> None:
+    if not all((SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM)):
+        raise RuntimeError("SMTP non configuré sur le serveur")
+
+    register_url = (
+        f"{PUBLIC_URL}/?invite={quote(code)}&email={quote(recipient)}"
+    )
+    expires = time.strftime("%d/%m/%Y à %H:%M", time.localtime(expires_at))
+    safe_code = html.escape(code)
+    safe_url = html.escape(register_url, quote=True)
+    message = EmailMessage()
+    message["Subject"] = "Votre laissez-passer pour Knockturn Alley"
+    message["From"] = SMTP_FROM
+    message["To"] = recipient
+    message.set_content(
+        "Votre demande a été acceptée.\n\n"
+        f"Code d'invitation : {code}\n"
+        f"Créer mon compte : {register_url}\n"
+        f"Ce laissez-passer expire le {expires}."
+    )
+    message.add_alternative(
+        f"""
+        <!doctype html><html lang="fr"><body style="margin:0;background:#09070b;color:#f8f3fa;font-family:Arial,sans-serif">
+          <div style="max-width:600px;margin:auto;padding:42px 22px">
+            <div style="border:1px solid #d7a55855;border-radius:24px;padding:38px;background:linear-gradient(145deg,#18121b,#0e0a11)">
+              <p style="margin:0 0 24px;color:#d7a558;font-size:11px;font-weight:700;letter-spacing:4px;text-align:center">MINISTÈRE DES PASSAGES MAGIQUES</p>
+              <h1 style="margin:0 0 16px;font-size:32px">Un hibou vous a trouvé ✦</h1>
+              <p style="color:#b9afb9;line-height:1.7">Votre demande a été approuvée. Le passage vers Knockturn Alley vous est désormais ouvert.</p>
+              <div style="margin:28px 0;padding:18px;border:1px dashed #d7a55888;border-radius:14px;background:#09070b;text-align:center">
+                <small style="display:block;color:#8e838f;letter-spacing:2px">VOTRE FORMULE MAGIQUE</small>
+                <strong style="display:block;margin-top:9px;color:#e6a1fa;font-size:25px;letter-spacing:2px">{safe_code}</strong>
+              </div>
+              <a href="{safe_url}" style="display:block;padding:16px;border-radius:13px;background:linear-gradient(90deg,#c96de9,#edb4ff);color:#280035;font-weight:800;text-align:center;text-decoration:none">Franchir le passage</a>
+              <p style="margin:22px 0 0;color:#756c77;font-size:12px;text-align:center">Ce laissez-passer expire le {expires}.</p>
+            </div>
+          </div>
+        </body></html>
+        """,
+        subtype="html",
+    )
+
+    context = ssl.create_default_context()
+    if SMTP_SSL:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20, context=context) as smtp:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(message)
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as smtp:
+            smtp.ehlo()
+            if SMTP_STARTTLS:
+                smtp.starttls(context=context)
+                smtp.ehlo()
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(message)
+
+
+async def invitation_delivery(invitation: dict[str, Any]) -> dict[str, Any]:
+    recipient = invitation.get("email")
+    if not recipient:
+        return {"mail_sent": False, "mail_error": None}
+    try:
+        await asyncio.to_thread(
+            send_invitation_email,
+            recipient,
+            invitation["code"],
+            invitation["expires_at"],
+        )
+        return {"mail_sent": True, "mail_error": None}
+    except Exception as exc:
+        # The invitation remains usable and visible to the administrator.
+        print(f"Invitation email failed for {recipient}: {type(exc).__name__}: {exc}")
+        return {"mail_sent": False, "mail_error": "Le code a été créé, mais le hibou n’a pas pu être envoyé"}
+
+
 @app.post("/api/admin/invitations")
 async def create_invitation(body: InvitationRequest, _: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
     email = body.email.strip().casefold() if body.email else None
@@ -350,7 +437,8 @@ async def create_invitation(body: InvitationRequest, _: dict[str, Any] = Depends
             except sqlite3.IntegrityError:
                 continue
         row = connection.execute("SELECT * FROM invitations WHERE id=?", (cursor.lastrowid,)).fetchone()
-    return {"invitation": dict(row)}
+    invitation = dict(row)
+    return {"invitation": invitation, **(await invitation_delivery(invitation))}
 
 
 @app.post("/api/admin/requests/{request_id}/approve")
@@ -364,7 +452,8 @@ async def approve_request(request_id: int, _: dict[str, Any] = Depends(superadmi
         cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at) VALUES(?,?,?,?,?)", (code, request["email"], 1, now + 7 * 86400, now))
         connection.execute("UPDATE access_requests SET status='approved',reviewed_at=? WHERE id=?", (now, request_id))
         invitation = connection.execute("SELECT * FROM invitations WHERE id=?", (cursor.lastrowid,)).fetchone()
-    return {"invitation": dict(invitation)}
+    invitation_data = dict(invitation)
+    return {"invitation": invitation_data, **(await invitation_delivery(invitation_data))}
 
 
 @app.post("/api/admin/requests/{request_id}/reject")
