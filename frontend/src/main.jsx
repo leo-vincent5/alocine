@@ -129,18 +129,25 @@ const publicMedia = async (id, season = 1) => {
     episodes = seasonPayload?.data?.items?.episodes || [],
     streams = { fr: {}, vo: {} };
   (media.urls || []).forEach((item) => {
-    const lang = /\bVF\b/i.test(String(item.name || "")) ? "fr" : "vo";
-    if (isSeries) {
-      const match = String(item.url || "").match(/S(\d+)\/E(\d+)/i);
-      if (match) {
-        const seasonKey = String(Number(match[1])),
-          episodeKey = String(Number(match[2]));
-        streams[lang][seasonKey] ??= {};
-        streams[lang][seasonKey][episodeKey] = item;
+    const sourceName = String(item.name || ""),
+      languages = /\bMULTI\b/i.test(sourceName)
+        ? ["fr", "vo"]
+        : /\bVF\b/i.test(sourceName)
+          ? ["fr"]
+          : ["vo"];
+    for (const lang of languages) {
+      if (isSeries) {
+        const match = String(item.url || "").match(/S(\d+)\/E(\d+)/i);
+        if (match) {
+          const seasonKey = String(Number(match[1])),
+            episodeKey = String(Number(match[2]));
+          streams[lang][seasonKey] ??= {};
+          streams[lang][seasonKey][episodeKey] = item;
+        }
+      } else {
+        streams[lang].movie ??= [];
+        streams[lang].movie.push(item);
       }
-    } else {
-      streams[lang].movie ??= [];
-      streams[lang].movie.push(item);
     }
   });
   return { media, episodes, streams, season, isSeries, language: "fr" };
@@ -389,14 +396,31 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     const resolvePlaybackUrl = async () => {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
       if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
-        const videoPlaylist = new URL("720p/playlist.m3u8", url).href;
-        if (audioLanguage !== "vo") return videoPlaylist;
-        const englishAudio = new URL("audio_en/playlist.m3u8", url).href;
+        const quality =
+            String(item?.sourceName || "").match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
+            "720",
+          videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href,
+          audioCode = audioLanguage === "vo" ? "en" : "fr",
+          audioName = audioLanguage === "vo" ? "English" : "Français",
+          audioPlaylist = new URL(
+            `audio_${audioCode}/playlist.m3u8`,
+            url,
+          ).href,
+          resolution =
+            quality === "2160"
+              ? "3840x2160"
+              : quality === "1440"
+                ? "2560x1440"
+                : quality === "1080"
+                  ? "1920x1080"
+                  : quality === "480"
+                    ? "854x480"
+                    : "1280x720";
         const synthetic = [
           "#EXTM3U",
           "#EXT-X-VERSION:3",
-          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="${englishAudio}"`,
-          '#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"',
+          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${audioName}",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="${audioCode}",URI="${audioPlaylist}"`,
+          `#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=${resolution},CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"`,
           videoPlaylist,
         ];
         const manifestUrl = URL.createObjectURL(
@@ -1014,6 +1038,7 @@ function Detail({ id, onBack, profile, onProfile, query, onQuery, onHistory }) {
     index,
     key: `${id}_${season}_${episode.episode}`,
     url: streamFor(episode.episode)?.url,
+    sourceName: streamFor(episode.episode)?.name || "",
     sources: {
       fr: exactStreamFor(episode.episode, "fr")?.url,
       vo: exactStreamFor(episode.episode, "vo")?.url,
@@ -1036,6 +1061,7 @@ function Detail({ id, onBack, profile, onProfile, query, onQuery, onHistory }) {
     index: 0,
     key: `${id}_movie`,
     url: movieStream?.url,
+    sourceName: movieStream?.name || "",
     sources: {
       fr: detail.streams?.fr?.movie?.[0]?.url,
       vo: detail.streams?.vo?.movie?.[0]?.url,
