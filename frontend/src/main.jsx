@@ -1589,10 +1589,11 @@ function AccessGate({ onAuthenticated }) {
     [error, setError] = useState("");
   const submit = async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setBusy(true);
     setError("");
     setNotice("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     try {
       if (mode === "request") {
         const response = await fetch(`${API}/api/access/request`, {
@@ -1609,7 +1610,7 @@ function AccessGate({ onAuthenticated }) {
         setNotice(
           "Votre hibou est parti. Vous recevrez bientôt votre code d’invitation.",
         );
-        event.currentTarget.reset();
+        formElement.reset();
       } else {
         const response = await fetch(
             `${API}/api/auth/${mode === "register" ? "register" : "login"}`,
