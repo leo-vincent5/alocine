@@ -395,6 +395,44 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     const temporaryManifests = [];
     const resolvePlaybackUrl = async () => {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
+      if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
+        const sourceName = String(item?.sourceName || ""),
+          quality =
+            sourceName.match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
+            (/\/hd\/master\.m3u8/i.test(url) ? "1080" : "720"),
+          videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href;
+
+        // Cloudflare blocks master.m3u8 while allowing its child playlists.
+        // Never request the master: use the quality advertised by Purstream.
+        if (/\bMULTI\b/i.test(sourceName)) setManifestLanguages(["fr", "vo"]);
+        if (audioLanguage === "fr") return videoPlaylist;
+
+        const englishAudio = new URL("audio_en/playlist.m3u8", url).href,
+          resolution =
+            quality === "2160"
+              ? "3840x2160"
+              : quality === "1440"
+                ? "2560x1440"
+                : quality === "1080"
+                  ? "1920x1080"
+                  : quality === "480"
+                    ? "854x480"
+                    : "1280x720",
+          synthetic = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:3",
+            `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="${englishAudio}"`,
+            `#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=${resolution},CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"`,
+            videoPlaylist,
+          ],
+          manifestUrl = URL.createObjectURL(
+            new Blob([`${synthetic.join("\n")}\n`], {
+              type: "application/vnd.apple.mpegurl",
+            }),
+          );
+        temporaryManifests.push(manifestUrl);
+        return manifestUrl;
+      }
       try {
         const response = await fetch(url, {
           signal: controller.signal,
