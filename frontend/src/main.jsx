@@ -1650,14 +1650,14 @@ function AccessGate({ onAuthenticated }) {
             ? "La porte est protégée par un sortilège"
             : mode === "login"
               ? "Heureux de vous revoir"
-              : "Utiliser votre invitation"}
+              : "Prononcez la formule magique"}
         </h1>
         <p>
           {mode === "request"
             ? "Présentez-vous au ministere. Une invitation vous sera envoyée après validation."
             : mode === "login"
               ? "Connectez-vous pour rejoindre votre profil."
-              : "Votre code ouvre les portes de la cinémathèque."}
+              : "On vous a confié la formule permettant d’ouvrir le passage ? Inscrivez-la ici sans attirer l’attention des Moldus."}
         </p>
         <form onSubmit={submit}>
           {mode === "register" && (
@@ -1694,7 +1694,7 @@ function AccessGate({ onAuthenticated }) {
               </label>
               {mode === "register" && (
                 <label>
-                  Code de parrainage
+                  Formule à prononcer <em>votre code de parrainage</em>
                   <input
                     name="invite_code"
                     defaultValue={invitationCode}
@@ -1714,7 +1714,7 @@ function AccessGate({ onAuthenticated }) {
                 ? "Demander une invitation"
                 : mode === "login"
                   ? "Se connecter"
-                  : "Créer mon compte"}
+                  : "Ouvrir le passage"}
           </button>
         </form>
         <div className="gate-switch">
@@ -1727,12 +1727,12 @@ function AccessGate({ onAuthenticated }) {
             onClick={() => setMode(mode === "login" ? "register" : "login")}
           >
             {mode === "login"
-              ? "J’ai un code de parrainage"
+              ? "On m’a confié la formule"
               : "J’ai déjà un compte"}
           </button>
           {mode === "request" && (
             <button onClick={() => setMode("register")}>
-              J’ai un code de parrainage
+              Vous connaissez la formule pour ouvrir le passage ?
             </button>
           )}
         </div>
