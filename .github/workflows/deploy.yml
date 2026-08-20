@@ -1,0 +1,73 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - production
+
+    environment: production
+
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v4
+
+      - name: Installer le frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Compiler le frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: ""
+        run: npm run build
+
+      - name: Déployer le frontend
+        run: |
+          rsync -a --delete frontend/dist/ /var/www/alocine/
+
+      - name: Déployer le backend
+        run: |
+          rsync -a --delete \
+            --exclude ".env" \
+            --exclude ".venv" \
+            --exclude "__pycache__" \
+            --exclude "*.db" \
+            backend/ /opt/alocine/backend/
+
+      - name: Installer les dépendances Python
+        run: |
+          /opt/alocine/.venv/bin/pip install \
+            --disable-pip-version-check \
+            -r /opt/alocine/backend/requirements.txt
+
+      - name: Redémarrer FastAPI
+        run: |
+          sudo /usr/bin/systemctl restart alocine-api
+          sudo /usr/bin/systemctl is-active alocine-api
+
+      - name: Vérifier le déploiement
+        run: |
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8091/api/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          sudo /usr/bin/systemctl status alocine-api
+          exit 1

@@ -25,7 +25,7 @@ import './history-mobile.css';
 import './series-slider.css';
 import './explore.css';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8091';
+const API = import.meta.env.VITE_API_URL ?? '';
 const fallback = 'https://placehold.co/900x1300/19151f/e08dff?text=Knockturn+Alley';
 const loadingSpells = [
   'Un peu de poudre de cheminette…',
