@@ -424,6 +424,10 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
           setManifestLanguages(["fr", "vo"]);
           return url;
         }
+        // Keep the long-standing working path for 720p VF sources. Their video
+        // playlist is already playable as-is; attaching a second AAC rendition
+        // can leave some browsers stuck at 0:00.
+        if (audioLanguage === "fr") return videoPlaylist;
         const synthetic = [
           "#EXTM3U",
           "#EXT-X-VERSION:3",
@@ -659,7 +663,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         // default ~60 MB window.
         maxBufferLength: 10,
         maxMaxBufferLength: 20,
-        maxBufferSize: 14 * 1024 * 1024,
+        maxBufferSize: 30 * 1024 * 1024,
         backBufferLength: 20,
         startFragPrefetch: false,
         manifestLoadingMaxRetry: 1,
