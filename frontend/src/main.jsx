@@ -654,12 +654,19 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     } else if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        backBufferLength: 60,
-        manifestLoadingMaxRetry: 2,
-        levelLoadingMaxRetry: 2,
-        fragLoadingMaxRetry: 2,
-        fragLoadingRetryDelay: 3000,
-        fragLoadingMaxRetryTimeout: 15000,
+        // Some 1080p fragments are nearly 6 MB each and the CDN rate-limits
+        // burst downloads. Keep only a small rolling buffer instead of the
+        // default ~60 MB window.
+        maxBufferLength: 10,
+        maxMaxBufferLength: 20,
+        maxBufferSize: 14 * 1024 * 1024,
+        backBufferLength: 20,
+        startFragPrefetch: false,
+        manifestLoadingMaxRetry: 1,
+        levelLoadingMaxRetry: 1,
+        fragLoadingMaxRetry: 1,
+        fragLoadingRetryDelay: 8000,
+        fragLoadingMaxRetryTimeout: 20000,
       });
       hlsRef.current = hls;
       hls.on(Hls.Events.MEDIA_ATTACHED, async () => {
@@ -695,6 +702,14 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
           const status = data.response?.code || data.response?.status;
           const limited = Number(status) === 429;
+          if (limited) {
+            clearTimeout(retryRef.current);
+            hls.stopLoad();
+            setError(
+              "Le serveur vidéo a déclenché sa protection 429. Patientez quelques instants puis rouvrez le lecteur.",
+            );
+            return;
+          }
           networkRetries += 1;
           if (networkRetries > 2) {
             clearTimeout(retryRef.current);
