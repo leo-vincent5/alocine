@@ -1281,15 +1281,17 @@ const ProfileAvatar = ({ avatar = 0, className = "" }) => (
 );
 
 function WhoWatching({ profiles, onSelect, onAdd, canClose = false, onClose }) {
-  const [adding, setAdding] = useState(false),
+  const [adding, setAdding] = useState(profiles.length === 0),
     [name, setName] = useState(""),
     [avatar, setAvatar] = useState(0);
   const create = async (event) => {
     event.preventDefault();
     if (!name.trim()) return;
-    await onAdd({ name: name.trim(), avatar });
+    const created = await onAdd({ name: name.trim(), avatar });
+    if (!created) return;
     setAdding(false);
     setName("");
+    onSelect(created);
   };
   return (
     <div className="watching">
@@ -1325,9 +1327,11 @@ function WhoWatching({ profiles, onSelect, onAdd, canClose = false, onClose }) {
             </div>
             <div>
               <button className="primary-profile">Créer le profil</button>
-              <button type="button" onClick={() => setAdding(false)}>
-                Annuler
-              </button>
+              {profiles.length > 0 && (
+                <button type="button" onClick={() => setAdding(false)}>
+                  Annuler
+                </button>
+              )}
             </div>
           </form>
         ) : (
@@ -2485,7 +2489,11 @@ function App() {
       body: JSON.stringify(body),
     });
     const value = await response.json();
-    if (response.ok) setProfiles((items) => [...items, value.profile]);
+    if (response.ok) {
+      setProfiles((items) => [...items, value.profile]);
+      return value.profile;
+    }
+    return null;
   };
   const updateProfile = async (updated) => {
     const token = localStorage.getItem("alocine_token");

@@ -580,7 +580,6 @@ async def register(body: AuthRequest) -> dict[str, Any]:
         with db() as connection:
             cursor = connection.execute("INSERT INTO users(email,name,password_hash,created_at,is_superadmin) VALUES(?,?,?,?,?)", (email, name, hash_password(body.password), int(time.time()), int(email == SUPERADMIN_EMAIL)))
             user_id = int(cursor.lastrowid)
-            connection.execute("INSERT INTO profiles(user_id,name,avatar,created_at) VALUES(?,?,?,?)", (user_id, name, 0, int(time.time())))
             if invitation:
                 connection.execute("UPDATE invitations SET uses=uses+1,active=CASE WHEN uses+1>=max_uses THEN 0 ELSE active END WHERE id=?", (invitation["id"],))
     except sqlite3.IntegrityError:
@@ -607,9 +606,6 @@ async def me(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
 async def profiles(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     with db() as connection:
         rows = connection.execute("SELECT id,name,avatar,language,auto_next_seconds FROM profiles WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
-        if not rows:
-            connection.execute("INSERT INTO profiles(user_id,name,avatar,created_at) VALUES(?,?,?,?)", (user["id"], user["name"], 0, int(time.time())))
-            rows = connection.execute("SELECT id,name,avatar,language,auto_next_seconds FROM profiles WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
     return {"items": [dict(row) for row in rows]}
 
 
