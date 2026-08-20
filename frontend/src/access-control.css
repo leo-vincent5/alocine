@@ -382,3 +382,164 @@
     transform: scale(1.2) rotate(25deg);
   }
 }
+
+/* Mobile: une vraie carte centrée, compacte et utilisable au pouce. */
+@media (max-width: 700px) {
+  .access-gate {
+    place-items: center;
+    align-items: center;
+    padding: max(14px, env(safe-area-inset-top)) 14px
+      max(14px, env(safe-area-inset-bottom));
+    background:
+      radial-gradient(circle at 50% 8%, #70247d4f, transparent 34%),
+      radial-gradient(circle at 50% 100%, #30183870, transparent 38%), #09070b;
+  }
+
+  .access-gate > section {
+    width: min(100%, 480px);
+    max-height: calc(100svh - 28px);
+    padding: 26px 22px 22px;
+    border-radius: 24px;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #bd65d6 transparent;
+    box-shadow: 0 22px 70px #000c, 0 0 45px #7b36871c;
+  }
+
+  .access-gate > section:before {
+    margin: -2px 0 20px;
+    padding-bottom: 15px;
+    font-size: 9px;
+    letter-spacing: 2.8px;
+  }
+
+  .gate-brand {
+    gap: 13px;
+    margin-bottom: 27px;
+  }
+
+  .gate-brand i {
+    width: 50px;
+    height: 50px;
+    border-radius: 14px;
+    font-size: 26px;
+  }
+
+  .gate-brand span { font-size: 19px; }
+  .access-gate section > small {
+    font-size: 10px;
+    letter-spacing: 3.2px;
+  }
+
+  .access-gate h1 {
+    margin: 8px 0 9px;
+    font-size: clamp(28px, 8vw, 35px);
+    line-height: 1.08;
+  }
+
+  .access-gate section > p {
+    margin: 0 0 17px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .access-gate label {
+    gap: 8px;
+    margin: 15px 0;
+    font-size: 13px;
+  }
+
+  .access-gate input,
+  .access-gate textarea {
+    min-height: 54px;
+    padding: 14px 15px;
+    border-radius: 13px;
+    font-size: 16px;
+  }
+
+  .access-gate textarea {
+    min-height: 92px;
+    max-height: 140px;
+  }
+
+  .gate-submit {
+    min-height: 56px;
+    margin-top: 9px;
+    font-size: 16px;
+    border-radius: 14px;
+  }
+
+  .gate-switch { margin-top: 17px; }
+  .gate-switch button {
+    min-height: 44px;
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+  .access-gate:before { left: 7vw; top: 8vh; }
+  .access-gate:after { right: 7vw; bottom: 7vh; }
+}
+
+/* Les très petits téléphones gardent les grandes zones tactiles sans couper le formulaire. */
+@media (max-width: 380px), (max-height: 700px) and (max-width: 700px) {
+  .access-gate > section { padding: 19px 17px 17px; }
+  .access-gate > section:before { margin-bottom: 13px; padding-bottom: 11px; }
+  .gate-brand { margin-bottom: 17px; }
+  .access-gate h1 { font-size: 26px; }
+  .access-gate section > p { margin-bottom: 10px; }
+  .access-gate label { margin: 10px 0; }
+  .access-gate textarea { min-height: 74px; }
+}
+
+/* Téléviseurs et grands écrans: lecture à distance et navigation au focus. */
+@media (min-width: 1400px) {
+  .access-gate { padding: 5vh 6vw; }
+
+  .access-gate > section {
+    width: min(760px, 76vw);
+    padding: 54px 64px 48px;
+    border-radius: 32px;
+    box-shadow: 0 50px 150px #000, 0 0 100px #7b36872b;
+  }
+
+  .access-gate > section:before {
+    margin: -20px 0 30px;
+    padding-bottom: 20px;
+    font-size: 11px;
+    letter-spacing: 5px;
+  }
+
+  .gate-brand { margin-bottom: 38px; gap: 18px; }
+  .gate-brand i { width: 62px; height: 62px; font-size: 31px; }
+  .gate-brand span { font-size: 24px; }
+  .access-gate section > small { font-size: 12px; letter-spacing: 5px; }
+  .access-gate h1 { font-size: 46px; margin: 14px 0 17px; }
+  .access-gate section > p { font-size: 17px; }
+  .access-gate label { margin: 19px 0; font-size: 15px; }
+
+  .access-gate input,
+  .access-gate textarea {
+    min-height: 58px;
+    padding: 15px 17px;
+    border-radius: 14px;
+    font-size: 18px;
+  }
+
+  .gate-submit { height: 62px; font-size: 18px; }
+  .gate-switch button { min-height: 48px; padding: 10px 18px; font-size: 15px; }
+}
+
+.access-gate button:focus-visible,
+.access-gate input:focus-visible,
+.access-gate textarea:focus-visible,
+.admin-shell button:focus-visible,
+.admin-shell input:focus-visible,
+.admin-shell select:focus-visible {
+  outline: 3px solid #f1c46d;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 7px #8f4aaa66, 0 0 28px #e1a6ff88;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .access-gate:before,
+  .access-gate:after { animation: none; }
+}
