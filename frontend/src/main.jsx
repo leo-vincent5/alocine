@@ -47,6 +47,20 @@ import "./access-control.css";
 const API = import.meta.env.VITE_API_URL ?? "";
 const PURSTREAM_API =
   import.meta.env.VITE_PURSTREAM_API || "https://api.purstream.store/api/v1";
+const HLS_PROXY_URL = String(import.meta.env.VITE_HLS_PROXY_URL || "").replace(
+  /\/+$/,
+  "",
+);
+const hlsUrl = (url) => {
+  if (!HLS_PROXY_URL) return url;
+  try {
+    const target = new URL(url);
+    if (target.hostname !== "free.finepulfe.xyz") return url;
+    return `${HLS_PROXY_URL}?url=${encodeURIComponent(target.href)}`;
+  } catch {
+    return url;
+  }
+};
 const publicJson = async (url, options = {}) => {
   const response = await fetch(url, options);
   if (!response.ok) throw new Error(`Purstream HTTP ${response.status}`);
@@ -406,7 +420,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
         if (!forcedQuality) {
           try {
-            const masterResponse = await fetch(url, {
+            const masterResponse = await fetch(hlsUrl(url), {
               signal: controller.signal,
               mode: "cors",
               credentials: "omit",
@@ -462,7 +476,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
                 /\/movies\/[^/]+\/hd\/master\.m3u8(?:\?.*)?$/i.test(url))
             ) {
               if (audioLines.length > 1) setManifestLanguages(["fr", "vo"]);
-              return new URL(selectedVariant.uri, url).href;
+              return hlsUrl(new URL(selectedVariant.uri, url).href);
             }
             if (selectedVariant && selectedAudio) {
               const codecs =
@@ -489,13 +503,15 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
                   .replace(/AUTOSELECT=(YES|NO)/i, "AUTOSELECT=YES")
                   .replace(
                     /URI="([^"]+)"/i,
-                    (_, path) => `URI="${new URL(path, url).href}"`,
+                    (_, path) => `URI="${hlsUrl(new URL(path, url).href)}"`,
                   ),
                 exactStreamInfo = selectedVariant.info.replace(
                   /,?SUBTITLES="[^"]+"/i,
                   "",
                 ),
-                exactVideoUrl = new URL(selectedVariant.uri, url).href,
+                exactVideoUrl = hlsUrl(
+                  new URL(selectedVariant.uri, url).href,
+                ),
                 exactManifest = [
                   "#EXTM3U",
                   "#EXT-X-VERSION:3",
@@ -519,13 +535,17 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
           }
         }
         const quality = forcedQuality || advertisedQuality,
-          videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href;
+          videoPlaylist = hlsUrl(
+            new URL(`${quality}p/playlist.m3u8`, url).href,
+          );
 
         // Fallback only when the master cannot be read on this Cloudflare edge.
         if (/\bMULTI\b/i.test(sourceName)) setManifestLanguages(["fr", "vo"]);
         if (audioLanguage === "fr") return videoPlaylist;
 
-        const englishAudio = new URL("audio_en/playlist.m3u8", url).href,
+        const englishAudio = hlsUrl(
+            new URL("audio_en/playlist.m3u8", url).href,
+          ),
           resolution =
             quality === "2160"
               ? "3840x2160"
@@ -553,7 +573,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       }
       // It is already a final media playlist. Do not pre-fetch it: an extra
       // Fetch/XHR request can trigger Cloudflare before hls.js starts playback.
-      return url;
+      return hlsUrl(url);
       /* Legacy parser kept unreachable for the moment; master manifests are
          deliberately bypassed above because the CDN rejects them. */
       try {

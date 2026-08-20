@@ -31,6 +31,7 @@ jobs:
         env:
           VITE_API_URL: ""
           VITE_PURSTREAM_API: "https://api.purstream.store/api/v1"
+          VITE_HLS_PROXY_URL: "https://knockturn-hls.alocine.workers.dev"
         run: npm run build
 
       - name: Déployer le frontend

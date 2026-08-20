@@ -1,0 +1,6 @@
+name = "knockturn-hls"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+
+[vars]
+ALLOWED_ORIGINS = "https://alocine.equicode.fr,http://localhost:5173"
