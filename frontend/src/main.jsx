@@ -410,7 +410,6 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
               signal: controller.signal,
               mode: "cors",
               credentials: "omit",
-              cache: "no-store",
               referrerPolicy: "no-referrer",
             });
             if (!masterResponse.ok)
