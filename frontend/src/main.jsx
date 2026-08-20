@@ -398,7 +398,13 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       try {
         const response = await fetch(url, {
           signal: controller.signal,
+          mode: "cors",
+          credentials: "omit",
+          cache: "no-store",
           referrerPolicy: "no-referrer",
+          headers: {
+            Accept: "application/vnd.apple.mpegurl, application/x-mpegURL, */*",
+          },
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const lines = (await response.text())

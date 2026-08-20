@@ -15,10 +15,10 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -294,37 +294,6 @@ async def fetch_media(path: str) -> dict[str, Any]:
             return response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=502, detail="Le média distant est indisponible") from exc
-
-
-@app.get("/api/hls/master.m3u8")
-async def localized_hls_master(url: str = Query(..., max_length=2000), lang: Literal["fr", "vo"] = "fr") -> Response:
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname or not (parsed.hostname == "finepulfe.xyz" or parsed.hostname.endswith(".finepulfe.xyz")):
-        raise HTTPException(status_code=400, detail="Source HLS non autorisée")
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=True) as client:
-            upstream = await client.get(url)
-            upstream.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Manifeste HLS indisponible") from exc
-    lines = upstream.text.splitlines()
-    audio_lines = [line for line in lines if line.startswith("#EXT-X-MEDIA:") and "TYPE=AUDIO" in line.upper()]
-    wanted = re.compile(r'LANGUAGE="?(en|eng)"?|NAME="?English', re.I) if lang == "vo" else re.compile(r'LANGUAGE="?(fr|fre|fra)"?|NAME="?Fran', re.I)
-    selected = next((line for line in audio_lines if wanted.search(line)), None)
-    if not selected:
-        raise HTTPException(status_code=404, detail="Piste audio demandée indisponible")
-    rewritten: list[str] = []
-    for line in lines:
-        if line in audio_lines and line != selected:
-            continue
-        if line == selected:
-            line = re.sub(r"DEFAULT=(YES|NO)", "DEFAULT=YES", line, flags=re.I)
-            line = re.sub(r"AUTOSELECT=(YES|NO)", "AUTOSELECT=YES", line, flags=re.I)
-        line = re.sub(r'URI="([^"]+)"', lambda match: f'URI="{urljoin(url, match.group(1))}"', line)
-        if line.strip() and not line.lstrip().startswith("#"):
-            line = urljoin(url, line.strip())
-        rewritten.append(line)
-    return Response("\n".join(rewritten) + "\n", media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/access/status")
