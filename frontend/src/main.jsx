@@ -77,6 +77,16 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     const temporaryManifests=[];
     const resolvePlaybackUrl=async()=>{
       if(!/\.m3u8(?:\?.*)?$/i.test(url))return url;
+      if(/\/master\.m3u8(?:\?.*)?$/i.test(url)){
+        const videoPlaylist=new URL('720p/playlist.m3u8',url).href;
+        if(audioLanguage!=='vo')return videoPlaylist;
+        const englishAudio=new URL('audio_en/playlist.m3u8',url).href;
+        const synthetic=['#EXTM3U','#EXT-X-VERSION:3',`#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="${englishAudio}"`,'#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"',videoPlaylist];
+        const manifestUrl=URL.createObjectURL(new Blob([`${synthetic.join('\n')}\n`],{type:'application/vnd.apple.mpegurl'}));
+        temporaryManifests.push(manifestUrl);
+        setManifestLanguages(['fr','vo']);
+        return manifestUrl;
+      }
       try{
         const response=await fetch(url,{signal:controller.signal,referrerPolicy:'no-referrer'});
         if(!response.ok)throw new Error(`HTTP ${response.status}`);
