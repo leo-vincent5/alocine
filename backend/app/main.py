@@ -35,7 +35,9 @@ SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "").strip().casefold()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+# Google displays app passwords in four groups. Accept both the grouped and
+# compact forms so a copied value cannot silently break SMTP authentication.
+SMTP_PASSWORD = "".join(os.getenv("SMTP_PASSWORD", "").split())
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME).strip()
 SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "true").lower() in {"1", "true", "yes", "on"}
 SMTP_SSL = os.getenv("SMTP_SSL", "false").lower() in {"1", "true", "yes", "on"}
