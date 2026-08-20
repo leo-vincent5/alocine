@@ -454,12 +454,13 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
               (a, b) => b.height - a.height || b.bandwidth - a.bandwidth,
             );
             const selectedVariant = variants[0];
-            // Preserve the proven 720p VF path: these playlists are directly
-            // playable and adding their external AAC rendition can stall the
-            // media timeline around 0:02 on otherwise valid streams.
+            // Preserve the proven 720p VF path. HD movie masters use the same
+            // layout, so feed hls.js the exact rendition advertised by the
+            // master instead of rebuilding a video + external AAC manifest.
             if (
-              selectedVariant?.height === 720 &&
-              audioLanguage === "fr"
+              audioLanguage === "fr" &&
+              (selectedVariant?.height === 720 ||
+                /\/movies\/[^/]+\/hd\/master\.m3u8(?:\?.*)?$/i.test(url))
             ) {
               if (audioLines.length > 1) setManifestLanguages(["fr", "vo"]);
               return new URL(selectedVariant.uri, url).href;
