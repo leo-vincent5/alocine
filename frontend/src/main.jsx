@@ -404,12 +404,95 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     const resolvePlaybackUrl = async (forcedQuality = null) => {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
       if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
+        if (!forcedQuality) {
+          try {
+            const masterResponse = await fetch(url, {
+              signal: controller.signal,
+              mode: "cors",
+              credentials: "omit",
+              cache: "no-store",
+              referrerPolicy: "no-referrer",
+            });
+            if (!masterResponse.ok)
+              throw new Error(`HTTP ${masterResponse.status}`);
+            const masterLines = (await masterResponse.text())
+                .split(/\r?\n/)
+                .map((line) => line.trim()),
+              audioLines = masterLines.filter(
+                (line) =>
+                  line.startsWith("#EXT-X-MEDIA:") &&
+                  /TYPE=AUDIO/i.test(line),
+              ),
+              wantedAudio =
+                audioLanguage === "vo"
+                  ? /LANGUAGE="?(en|eng)"?|NAME="?English/i
+                  : /LANGUAGE="?(fr|fre|fra)"?|NAME="?Fran/i,
+              selectedAudio = audioLines.find((line) =>
+                wantedAudio.test(line),
+              ),
+              variants = [];
+            for (let index = 0; index < masterLines.length; index += 1) {
+              if (!masterLines[index].startsWith("#EXT-X-STREAM-INF:"))
+                continue;
+              const uri = masterLines
+                .slice(index + 1)
+                .find((line) => line && !line.startsWith("#"));
+              if (uri)
+                variants.push({
+                  info: masterLines[index],
+                  uri,
+                  height: Number(
+                    masterLines[index].match(/RESOLUTION=\d+x(\d+)/i)?.[1] ||
+                      0,
+                  ),
+                  bandwidth: Number(
+                    masterLines[index].match(/BANDWIDTH=(\d+)/i)?.[1] || 0,
+                  ),
+                });
+            }
+            variants.sort(
+              (a, b) => b.height - a.height || b.bandwidth - a.bandwidth,
+            );
+            const selectedVariant = variants[0];
+            if (selectedVariant && selectedAudio) {
+              const absoluteAudio = selectedAudio
+                  .replace(/DEFAULT=(YES|NO)/i, "DEFAULT=YES")
+                  .replace(/AUTOSELECT=(YES|NO)/i, "AUTOSELECT=YES")
+                  .replace(
+                    /URI="([^"]+)"/i,
+                    (_, path) => `URI="${new URL(path, url).href}"`,
+                  ),
+                exactStreamInfo = selectedVariant.info.replace(
+                  /,?SUBTITLES="[^"]+"/i,
+                  "",
+                ),
+                exactVideoUrl = new URL(selectedVariant.uri, url).href,
+                exactManifest = [
+                  "#EXTM3U",
+                  "#EXT-X-VERSION:3",
+                  absoluteAudio,
+                  exactStreamInfo,
+                  exactVideoUrl,
+                ],
+                exactManifestUrl = URL.createObjectURL(
+                  new Blob([`${exactManifest.join("\n")}\n`], {
+                    type: "application/vnd.apple.mpegurl",
+                  }),
+                );
+              temporaryManifests.push(exactManifestUrl);
+              if (audioLines.length > 1) setManifestLanguages(["fr", "vo"]);
+              return exactManifestUrl;
+            }
+          } catch (reason) {
+            if (reason?.name === "AbortError") throw reason;
+            // Some Cloudflare edges reject master.m3u8. Keep the quality-based
+            // fallback below so playback can still start.
+          }
+        }
         const quality = forcedQuality || advertisedQuality,
           videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href;
 
-        // Cloudflare blocks master.m3u8 while allowing its child playlists.
-        // Never request or preflight the master/child playlist: hls.js performs
-        // the single playback request and handles a 404 fallback below.
+        // Fallback only when the master cannot be read on this Cloudflare edge.
         if (/\bMULTI\b/i.test(sourceName)) setManifestLanguages(["fr", "vo"]);
         if (audioLanguage === "fr") return videoPlaylist;
 
