@@ -1584,6 +1584,8 @@ function AccessGate({ onAuthenticated }) {
     invitationCode = invitationParams.get("invite") || "",
     invitationEmail = invitationParams.get("email") || "",
     [mode, setMode] = useState(invitationCode ? "register" : "request"),
+    [prefillCode, setPrefillCode] = useState(invitationCode),
+    [prefillEmail, setPrefillEmail] = useState(invitationEmail),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -1596,6 +1598,16 @@ function AccessGate({ onAuthenticated }) {
     const form = new FormData(formElement);
     try {
       if (mode === "request") {
+        const referralCode = String(form.get("referral_code") || "").trim();
+        if (referralCode) {
+          setPrefillCode(referralCode.toUpperCase());
+          setPrefillEmail(String(form.get("email") || ""));
+          setMode("register");
+          setNotice(
+            "Formule reconnue : vous pouvez créer votre compte directement.",
+          );
+          return;
+        }
         const response = await fetch(`${API}/api/access/request`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1671,7 +1683,7 @@ function AccessGate({ onAuthenticated }) {
             <input
               name="email"
               type="email"
-              defaultValue={invitationEmail}
+              defaultValue={prefillEmail}
               required
             />
           </label>
@@ -1686,10 +1698,10 @@ function AccessGate({ onAuthenticated }) {
                 />
               </label>
               <label>
-                Formule magique pour forcer la porte ? <em>facultatif</em>
+                Vous avez un code de parrainage ? <em>facultatif</em>
                 <input
                   name="referral_code"
-                  placeholder="La formule magique apprise par une personne peu recommandable ? "
+                  placeholder="KNOCK-XXXXXXXX"
                 />
               </label>
             </>
@@ -1701,10 +1713,10 @@ function AccessGate({ onAuthenticated }) {
               </label>
               {mode === "register" && (
                 <label>
-                  Code d’invitation
+                  Code de parrainage
                   <input
                     name="invite_code"
-                    defaultValue={invitationCode}
+                    defaultValue={prefillCode}
                     required
                     placeholder="KNOCK-XXXXXXXX"
                   />
@@ -1734,9 +1746,14 @@ function AccessGate({ onAuthenticated }) {
             onClick={() => setMode(mode === "login" ? "register" : "login")}
           >
             {mode === "login"
-              ? "J’ai un code d’invitation"
+              ? "J’ai un code de parrainage"
               : "J’ai déjà un compte"}
           </button>
+          {mode === "request" && (
+            <button onClick={() => setMode("register")}>
+              J’ai un code de parrainage
+            </button>
+          )}
         </div>
       </section>
     </main>
@@ -2362,6 +2379,32 @@ function App() {
       .catch(() => localStorage.removeItem("alocine_token"))
       .finally(() => setAuthChecked(true));
   }, []);
+  useEffect(() => {
+    if (!user) return;
+    const validateSession = () => {
+      const token = localStorage.getItem("alocine_token");
+      if (!token) return;
+      fetch(`${API}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((response) => {
+        if (response.ok) return;
+        localStorage.removeItem("alocine_token");
+        localStorage.removeItem("alocine_profile");
+        setUser(null);
+        setProfile(null);
+        setProfiles([]);
+      });
+    };
+    const interval = window.setInterval(validateSession, 30_000),
+      onVisibility = () => {
+        if (document.visibilityState === "visible") validateSession();
+      };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [user]);
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem("alocine_token");
