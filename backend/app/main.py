@@ -22,6 +22,8 @@ PURSTREAM_URL = os.getenv(
 )
 TIMEOUT_SECONDS = float(os.getenv("UPSTREAM_TIMEOUT", "20"))
 AUTH_SECRET = os.getenv("AUTH_SECRET", "change-this-development-secret")
+INVITE_ONLY = os.getenv("INVITE_ONLY", "true").lower() in {"1", "true", "yes", "on"}
+SUPERADMIN_EMAIL = os.getenv("SUPERADMIN_EMAIL", "").strip().casefold()
 DB_PATH = Path(os.getenv("DATABASE_PATH", Path(__file__).resolve().parent.parent / "alocine.db"))
 
 app = FastAPI(title="Alocine API", version="0.1.0")
@@ -38,6 +40,19 @@ class AuthRequest(BaseModel):
     email: str = Field(min_length=5, max_length=254)
     password: str = Field(min_length=8, max_length=128)
     name: str | None = Field(default=None, max_length=80)
+    invite_code: str | None = Field(default=None, max_length=80)
+
+
+class AccessRequestBody(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    message: str = Field(default="", max_length=1000)
+    referral_code: str = Field(default="", max_length=80)
+
+
+class InvitationRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=254)
+    max_uses: int = Field(default=1, ge=1, le=100)
+    expires_hours: int = Field(default=168, ge=1, le=8760)
 
 
 class ProgressRequest(BaseModel):
@@ -126,6 +141,25 @@ def init_db() -> None:
             PRIMARY KEY (profile_id, media_id),
             FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS access_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            message TEXT NOT NULL DEFAULT '',
+            referral_code TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            reviewed_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS invitations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE,
+            email TEXT,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            uses INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL
+        );
         """)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(profiles)").fetchall()}
         if "language" not in columns:
@@ -137,6 +171,13 @@ def init_db() -> None:
             connection.execute("ALTER TABLE profile_progress ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
         if "skipped_auto" not in progress_columns:
             connection.execute("ALTER TABLE profile_progress ADD COLUMN skipped_auto INTEGER NOT NULL DEFAULT 0")
+        user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+        if "is_superadmin" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0")
+        if "is_blocked" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0")
+        if SUPERADMIN_EMAIL:
+            connection.execute("UPDATE users SET is_superadmin=1 WHERE lower(email)=?", (SUPERADMIN_EMAIL,))
 
 
 init_db()
@@ -175,12 +216,18 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
         if int(decoded["exp"]) < time.time():
             raise ValueError
         with db() as connection:
-            row = connection.execute("SELECT id,email,name FROM users WHERE id=?", (int(decoded["sub"]),)).fetchone()
-        if not row:
+            row = connection.execute("SELECT id,email,name,is_superadmin,is_blocked FROM users WHERE id=?", (int(decoded["sub"]),)).fetchone()
+        if not row or row["is_blocked"]:
             raise ValueError
         return dict(row)
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         raise HTTPException(status_code=401, detail="Session invalide")
+
+
+def superadmin(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if not user.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="Accès superadmin requis")
+    return user
 
 
 async def fetch_catalog(
@@ -259,29 +306,123 @@ async def localized_hls_master(url: str = Query(..., max_length=2000), lang: Lit
     return Response("\n".join(rewritten) + "\n", media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/access/status")
+async def access_status() -> dict[str, bool]:
+    return {"invite_only": INVITE_ONLY}
+
+
+@app.post("/api/access/request")
+async def request_access(body: AccessRequestBody) -> dict[str, str]:
+    email = body.email.strip().casefold()
+    if "@" not in email:
+        raise HTTPException(status_code=422, detail="Adresse email invalide")
+    with db() as connection:
+        existing = connection.execute("SELECT id,status FROM access_requests WHERE email=? ORDER BY id DESC LIMIT 1", (email,)).fetchone()
+        if existing and existing["status"] == "pending":
+            raise HTTPException(status_code=409, detail="Une demande est déjà en attente pour cette adresse")
+        connection.execute("INSERT INTO access_requests(email,message,referral_code,status,created_at) VALUES(?,?,?,?,?)", (email, body.message.strip(), body.referral_code.strip(), "pending", int(time.time())))
+    return {"status": "pending"}
+
+
+@app.get("/api/admin/access")
+async def admin_access(_: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
+    with db() as connection:
+        requests = [dict(row) for row in connection.execute("SELECT * FROM access_requests ORDER BY created_at DESC LIMIT 300").fetchall()]
+        invitations = [dict(row) for row in connection.execute("SELECT * FROM invitations ORDER BY created_at DESC LIMIT 300").fetchall()]
+        users = [dict(row) for row in connection.execute("SELECT id,email,name,is_superadmin,is_blocked,created_at FROM users ORDER BY created_at DESC").fetchall()]
+    return {"requests": requests, "invitations": invitations, "users": users}
+
+
+def new_invitation_code() -> str:
+    return "KNOCK-" + secrets.token_hex(4).upper()
+
+
+@app.post("/api/admin/invitations")
+async def create_invitation(body: InvitationRequest, _: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
+    email = body.email.strip().casefold() if body.email else None
+    now = int(time.time())
+    with db() as connection:
+        while True:
+            code = new_invitation_code()
+            try:
+                cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at) VALUES(?,?,?,?,?)", (code, email, body.max_uses, now + body.expires_hours * 3600, now))
+                break
+            except sqlite3.IntegrityError:
+                continue
+        row = connection.execute("SELECT * FROM invitations WHERE id=?", (cursor.lastrowid,)).fetchone()
+    return {"invitation": dict(row)}
+
+
+@app.post("/api/admin/requests/{request_id}/approve")
+async def approve_request(request_id: int, _: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
+    now = int(time.time())
+    with db() as connection:
+        request = connection.execute("SELECT * FROM access_requests WHERE id=?", (request_id,)).fetchone()
+        if not request:
+            raise HTTPException(status_code=404, detail="Demande introuvable")
+        code = new_invitation_code()
+        cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at) VALUES(?,?,?,?,?)", (code, request["email"], 1, now + 7 * 86400, now))
+        connection.execute("UPDATE access_requests SET status='approved',reviewed_at=? WHERE id=?", (now, request_id))
+        invitation = connection.execute("SELECT * FROM invitations WHERE id=?", (cursor.lastrowid,)).fetchone()
+    return {"invitation": dict(invitation)}
+
+
+@app.post("/api/admin/requests/{request_id}/reject")
+async def reject_request(request_id: int, _: dict[str, Any] = Depends(superadmin)) -> dict[str, str]:
+    with db() as connection:
+        connection.execute("UPDATE access_requests SET status='rejected',reviewed_at=? WHERE id=?", (int(time.time()), request_id))
+    return {"status": "rejected"}
+
+
+@app.delete("/api/admin/invitations/{invitation_id}")
+async def revoke_invitation(invitation_id: int, _: dict[str, Any] = Depends(superadmin)) -> dict[str, str]:
+    with db() as connection:
+        connection.execute("UPDATE invitations SET active=0 WHERE id=?", (invitation_id,))
+    return {"status": "revoked"}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-block")
+async def toggle_user_block(user_id: int, admin: dict[str, Any] = Depends(superadmin)) -> dict[str, bool]:
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=409, detail="Impossible de bloquer votre propre compte")
+    with db() as connection:
+        connection.execute("UPDATE users SET is_blocked=CASE is_blocked WHEN 1 THEN 0 ELSE 1 END WHERE id=?", (user_id,))
+        row = connection.execute("SELECT is_blocked FROM users WHERE id=?", (user_id,)).fetchone()
+    return {"is_blocked": bool(row and row["is_blocked"])}
+
+
 @app.post("/api/auth/register")
 async def register(body: AuthRequest) -> dict[str, Any]:
     email = body.email.strip().casefold()
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Adresse email invalide")
     name = (body.name or email.split("@", 1)[0]).strip() or "Utilisateur"
+    invitation = None
+    if INVITE_ONLY and email != SUPERADMIN_EMAIL:
+        code = (body.invite_code or "").strip().upper()
+        with db() as connection:
+            invitation = connection.execute("SELECT * FROM invitations WHERE code=? AND active=1 AND uses<max_uses AND expires_at>?", (code, int(time.time()))).fetchone()
+        if not invitation or (invitation["email"] and invitation["email"].casefold() != email):
+            raise HTTPException(status_code=403, detail="Invitation invalide, expirée ou réservée à une autre adresse")
     try:
         with db() as connection:
-            cursor = connection.execute("INSERT INTO users(email,name,password_hash,created_at) VALUES(?,?,?,?)", (email, name, hash_password(body.password), int(time.time())))
+            cursor = connection.execute("INSERT INTO users(email,name,password_hash,created_at,is_superadmin) VALUES(?,?,?,?,?)", (email, name, hash_password(body.password), int(time.time()), int(email == SUPERADMIN_EMAIL)))
             user_id = int(cursor.lastrowid)
             connection.execute("INSERT INTO profiles(user_id,name,avatar,created_at) VALUES(?,?,?,?)", (user_id, name, 0, int(time.time())))
+            if invitation:
+                connection.execute("UPDATE invitations SET uses=uses+1,active=CASE WHEN uses+1>=max_uses THEN 0 ELSE active END WHERE id=?", (invitation["id"],))
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email")
-    return {"token": create_token(user_id), "user": {"id": user_id, "email": email, "name": name}}
+    return {"token": create_token(user_id), "user": {"id": user_id, "email": email, "name": name, "is_superadmin": email == SUPERADMIN_EMAIL}}
 
 
 @app.post("/api/auth/login")
 async def login(body: AuthRequest) -> dict[str, Any]:
     with db() as connection:
-        row = connection.execute("SELECT id,email,name,password_hash FROM users WHERE email=?", (body.email.strip().casefold(),)).fetchone()
-    if not row or not verify_password(body.password, row["password_hash"]):
+        row = connection.execute("SELECT id,email,name,password_hash,is_superadmin,is_blocked FROM users WHERE email=?", (body.email.strip().casefold(),)).fetchone()
+    if not row or row["is_blocked"] or not verify_password(body.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
-    user = {"id": row["id"], "email": row["email"], "name": row["name"]}
+    user = {"id": row["id"], "email": row["email"], "name": row["name"], "is_superadmin": bool(row["is_superadmin"])}
     return {"token": create_token(row["id"]), "user": user}
 
 

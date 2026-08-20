@@ -1,0 +1,384 @@
+.access-gate {
+  position: fixed;
+  z-index: 500;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 20% 15%, #69217b55, transparent 30%),
+    radial-gradient(circle at 80% 85%, #38204866, transparent 35%), #09070b;
+}
+.gate-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    transparent 25%,
+    #d978ff0b 50%,
+    transparent 75%
+  );
+}
+.access-gate > section {
+  position: relative;
+  width: min(530px, 100%);
+  padding: 42px;
+  border: 1px solid #ffffff18;
+  border-radius: 28px;
+  background: #121016ef;
+  box-shadow: 0 40px 120px #000;
+}
+.gate-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 30px;
+}
+.gate-brand i {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #d978ff;
+  color: #280035;
+  font: 900 24px Epilogue;
+}
+.gate-brand span {
+  font: 800 17px Epilogue;
+}
+.access-gate section > small {
+  color: #d978ff;
+  font-size: 9px;
+  letter-spacing: 4px;
+}
+.access-gate h1 {
+  font: 900 34px/1.08 Epilogue;
+  margin: 10px 0 12px;
+}
+.access-gate section > p {
+  color: #958e98;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.access-gate label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 14px 0;
+  color: #bbb;
+  font-size: 11px;
+  font-weight: 800;
+}
+.access-gate label em {
+  font-weight: 500;
+  color: #716b74;
+}
+.access-gate input,
+.access-gate textarea {
+  width: 100%;
+  border: 1px solid #ffffff17;
+  border-radius: 11px;
+  padding: 12px 13px;
+  background: #08070a;
+  color: white;
+  outline: 0;
+  resize: vertical;
+}
+.access-gate input:focus,
+.access-gate textarea:focus {
+  border-color: #d978ff;
+}
+.gate-submit {
+  width: 100%;
+  height: 48px;
+  margin-top: 9px;
+  border: 0;
+  border-radius: 12px;
+  background: #d978ff;
+  color: #280035;
+  font-weight: 900;
+  cursor: pointer;
+}
+.gate-submit:disabled {
+  opacity: 0.55;
+}
+.gate-message {
+  padding: 11px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+.gate-message.error {
+  background: #48151d;
+  color: #ffabb7;
+}
+.gate-message.success {
+  background: #153522;
+  color: #9bf0b9;
+}
+.gate-switch {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.gate-switch button {
+  border: 0;
+  background: transparent;
+  color: #d978ff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.admin-action {
+  border-color: #d978ff66 !important;
+  color: #e08dff !important;
+}
+.admin-shell {
+  position: fixed;
+  z-index: 600;
+  inset: 0;
+  padding: 40px max(24px, 5vw);
+  overflow: auto;
+  background: #09070bf5;
+  backdrop-filter: blur(18px);
+}
+.admin-shell > header {
+  position: static;
+  height: auto;
+  padding: 0 0 25px;
+  background: none;
+  display: flex;
+  justify-content: space-between;
+}
+.admin-shell header small {
+  color: #d978ff;
+  letter-spacing: 4px;
+}
+.admin-shell h1 {
+  margin: 5px 0;
+  font: 900 35px Epilogue;
+}
+.admin-shell header button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid #ffffff18;
+  border-radius: 50%;
+  background: #ffffff0c;
+}
+.admin-shell > nav {
+  justify-content: flex-start;
+  gap: 8px;
+  margin: 0 0 25px;
+}
+.admin-shell > nav button {
+  padding: 11px 16px;
+  border: 1px solid #ffffff12;
+  border-radius: 99px;
+  background: #ffffff08;
+}
+.admin-shell > nav button.active {
+  background: #d978ff;
+  color: #280035;
+}
+.admin-shell > nav b {
+  margin-left: 8px;
+}
+.admin-shell > main {
+  max-width: 1100px;
+}
+.admin-list {
+  display: grid;
+  gap: 10px;
+}
+.admin-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid #ffffff10;
+  border-radius: 15px;
+  background: #111015;
+}
+.admin-list p {
+  margin: 6px 0;
+  color: #aaa;
+  font-size: 12px;
+}
+.admin-list small {
+  color: #716b75;
+}
+.admin-list aside {
+  display: flex;
+  gap: 7px;
+}
+.admin-list button,
+.invite-form button,
+.created-code button {
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 13px;
+  background: #d978ff;
+  color: #280035;
+  font-weight: 800;
+}
+.admin-list button.danger {
+  background: #43141c;
+  color: #ff9eac;
+}
+.invite-form {
+  display: grid;
+  grid-template-columns: 2fr 90px 130px auto;
+  gap: 9px;
+  margin-bottom: 20px;
+}
+.invite-form input,
+.invite-form select {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #ffffff15;
+  border-radius: 10px;
+  background: #111015;
+  color: white;
+}
+.created-code,
+.admin-error {
+  max-width: 1100px;
+  margin-bottom: 18px;
+  padding: 13px;
+  border-radius: 11px;
+}
+.created-code {
+  background: #24122c;
+  color: #e8b2fb;
+}
+.created-code strong {
+  margin: 0 10px;
+}
+.admin-error {
+  background: #48151d;
+  color: #ffabb7;
+}
+@media (max-width: 700px) {
+  .access-gate {
+    padding: 0;
+    align-items: end;
+  }
+  .access-gate > section {
+    width: 100%;
+    max-height: 100svh;
+    padding: 28px 20px;
+    border-radius: 25px 25px 0 0;
+    overflow: auto;
+  }
+  .access-gate h1 {
+    font-size: 27px;
+  }
+  .admin-shell {
+    padding: 22px 14px;
+  }
+  .admin-shell h1 {
+    font-size: 27px;
+  }
+  .admin-shell > nav {
+    display: flex !important;
+    overflow: auto;
+  }
+  .admin-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .admin-list aside {
+    width: 100%;
+  }
+  .admin-list aside button,
+  .admin-list article > button {
+    flex: 1;
+  }
+  .invite-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .invite-form input:first-child {
+    grid-column: 1/-1;
+  }
+  .invite-form button {
+    grid-column: 1/-1;
+  }
+}
+.access-gate:before,
+.access-gate:after {
+  content: "✦";
+  position: fixed;
+  color: #e8b2ff;
+  text-shadow: 0 0 18px #d978ff;
+  animation: gateStar 3.5s ease-in-out infinite;
+}
+.access-gate:before {
+  left: 9vw;
+  top: 17vh;
+  font-size: 24px;
+}
+.access-gate:after {
+  right: 11vw;
+  bottom: 18vh;
+  font-size: 17px;
+  animation-delay: 1.4s;
+}
+.access-gate > section:before {
+  content: "MINISTÈRE DE LA MAGIQUE";
+  display: block;
+  margin: -16px 0 22px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #d7a55835;
+  color: #d7a558;
+  font: 700 8px Epilogue;
+  letter-spacing: 3px;
+  text-align: center;
+}
+.access-gate > section {
+  border-color: #d7a55830;
+  background: linear-gradient(145deg, #17121aef, #0d0a10f5);
+  box-shadow:
+    0 40px 120px #000,
+    0 0 70px #7b36871b;
+}
+.gate-brand i {
+  background: linear-gradient(145deg, #f0b9ff, #ad55cc);
+  box-shadow: 0 0 30px #d978ff55;
+}
+.gate-submit {
+  background: linear-gradient(90deg, #c96de9, #edb4ff);
+  box-shadow: 0 9px 28px #b84fd52c;
+}
+.admin-shell {
+  background:
+    radial-gradient(circle at 85% 10%, #5d28624a, transparent 28%),
+    linear-gradient(#09070bf8, #0d0910f8);
+}
+.admin-shell:before {
+  content: "✦  REGISTRE DES SORCIERS AUTORISÉS  ✦";
+  display: block;
+  margin-bottom: 25px;
+  color: #d7a558;
+  font: 700 9px Epilogue;
+  letter-spacing: 4px;
+}
+.admin-list article {
+  border-color: #d7a55820;
+  background: linear-gradient(110deg, #151018, #0d0a10);
+}
+@keyframes gateStar {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8) rotate(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2) rotate(25deg);
+  }
+}
