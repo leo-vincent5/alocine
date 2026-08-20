@@ -397,13 +397,44 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
       if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
         const sourceName = String(item?.sourceName || ""),
-          quality =
+          advertisedQuality =
             sourceName.match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
             (/\/hd\/master\.m3u8/i.test(url) ? "1080" : "720"),
+          candidates = [
+            ...new Set([advertisedQuality, "1080", "720", "480"]),
+          ];
+        let quality = advertisedQuality,
           videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href;
 
+        // Purstream's quality label is sometimes stale. Probe only the child
+        // playlists (the master itself is blocked) and keep the first one that
+        // really exists. A 429 also proves the path exists, so do not fall back
+        // to a lower and unrelated rendition in that case.
+        for (const candidate of candidates) {
+          const candidateUrl = new URL(
+            `${candidate}p/playlist.m3u8`,
+            url,
+          ).href;
+          try {
+            const response = await fetch(candidateUrl, {
+              signal: controller.signal,
+              mode: "cors",
+              credentials: "omit",
+              cache: "no-store",
+              referrerPolicy: "no-referrer",
+            });
+            if (response.ok || response.status === 429) {
+              quality = candidate;
+              videoPlaylist = candidateUrl;
+              break;
+            }
+          } catch (reason) {
+            if (reason?.name === "AbortError") throw reason;
+          }
+        }
+
         // Cloudflare blocks master.m3u8 while allowing its child playlists.
-        // Never request the master: use the quality advertised by Purstream.
+        // Never request the master: use the child playlist verified above.
         if (/\bMULTI\b/i.test(sourceName)) setManifestLanguages(["fr", "vo"]);
         if (audioLanguage === "fr") return videoPlaylist;
 
