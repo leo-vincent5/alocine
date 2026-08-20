@@ -454,6 +454,16 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
               (a, b) => b.height - a.height || b.bandwidth - a.bandwidth,
             );
             const selectedVariant = variants[0];
+            // Preserve the proven 720p VF path: these playlists are directly
+            // playable and adding their external AAC rendition can stall the
+            // media timeline around 0:02 on otherwise valid streams.
+            if (
+              selectedVariant?.height === 720 &&
+              audioLanguage === "fr"
+            ) {
+              if (audioLines.length > 1) setManifestLanguages(["fr", "vo"]);
+              return new URL(selectedVariant.uri, url).href;
+            }
             if (selectedVariant && selectedAudio) {
               const codecs =
                   selectedVariant.info.match(/CODECS="([^"]+)"/i)?.[1] || "",
