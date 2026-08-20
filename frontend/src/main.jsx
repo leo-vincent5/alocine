@@ -1584,8 +1584,6 @@ function AccessGate({ onAuthenticated }) {
     invitationCode = invitationParams.get("invite") || "",
     invitationEmail = invitationParams.get("email") || "",
     [mode, setMode] = useState(invitationCode ? "register" : "request"),
-    [prefillCode, setPrefillCode] = useState(invitationCode),
-    [prefillEmail, setPrefillEmail] = useState(invitationEmail),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     [error, setError] = useState("");
@@ -1598,23 +1596,13 @@ function AccessGate({ onAuthenticated }) {
     const form = new FormData(formElement);
     try {
       if (mode === "request") {
-        const referralCode = String(form.get("referral_code") || "").trim();
-        if (referralCode) {
-          setPrefillCode(referralCode.toUpperCase());
-          setPrefillEmail(String(form.get("email") || ""));
-          setMode("register");
-          setNotice(
-            "Formule reconnue : vous pouvez créer votre compte directement.",
-          );
-          return;
-        }
         const response = await fetch(`${API}/api/access/request`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               email: form.get("email"),
               message: form.get("message"),
-              referral_code: form.get("referral_code"),
+              referral_code: "",
             }),
           }),
           value = await response.json();
@@ -1683,7 +1671,7 @@ function AccessGate({ onAuthenticated }) {
             <input
               name="email"
               type="email"
-              defaultValue={prefillEmail}
+              defaultValue={invitationEmail}
               required
             />
           </label>
@@ -1695,13 +1683,6 @@ function AccessGate({ onAuthenticated }) {
                   name="message"
                   rows="4"
                   placeholder="Dites-nous pourquoi vous souhaitez penetrer le passage"
-                />
-              </label>
-              <label>
-                Vous avez un code de parrainage ? <em>facultatif</em>
-                <input
-                  name="referral_code"
-                  placeholder="KNOCK-XXXXXXXX"
                 />
               </label>
             </>
@@ -1716,7 +1697,7 @@ function AccessGate({ onAuthenticated }) {
                   Code de parrainage
                   <input
                     name="invite_code"
-                    defaultValue={prefillCode}
+                    defaultValue={invitationCode}
                     required
                     placeholder="KNOCK-XXXXXXXX"
                   />
