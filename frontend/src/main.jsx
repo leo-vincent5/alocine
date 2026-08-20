@@ -416,6 +416,14 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
                   : quality === "480"
                     ? "854x480"
                     : "1280x720";
+        // Higher-quality MULTI masters already contain the exact video/audio
+        // declarations. Let hls.js consume them directly instead of guessing
+        // codec and bandwidth values in a synthetic manifest. The legacy 720p
+        // fallback remains for sources whose master is blocked by the CDN.
+        if (quality !== "720") {
+          setManifestLanguages(["fr", "vo"]);
+          return url;
+        }
         const synthetic = [
           "#EXTM3U",
           "#EXT-X-VERSION:3",
