@@ -395,55 +395,6 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     const temporaryManifests = [];
     const resolvePlaybackUrl = async () => {
       if (!/\.m3u8(?:\?.*)?$/i.test(url)) return url;
-      if (/\/master\.m3u8(?:\?.*)?$/i.test(url)) {
-        const quality =
-            String(item?.sourceName || "").match(/\b(2160|1440|1080|720|480)p\b/i)?.[1] ||
-            "720",
-          videoPlaylist = new URL(`${quality}p/playlist.m3u8`, url).href,
-          audioCode = audioLanguage === "vo" ? "en" : "fr",
-          audioName = audioLanguage === "vo" ? "English" : "Français",
-          audioPlaylist = new URL(
-            `audio_${audioCode}/playlist.m3u8`,
-            url,
-          ).href,
-          resolution =
-            quality === "2160"
-              ? "3840x2160"
-              : quality === "1440"
-                ? "2560x1440"
-                : quality === "1080"
-                  ? "1920x1080"
-                  : quality === "480"
-                    ? "854x480"
-                    : "1280x720";
-        // Higher-quality MULTI masters already contain the exact video/audio
-        // declarations. Let hls.js consume them directly instead of guessing
-        // codec and bandwidth values in a synthetic manifest. The legacy 720p
-        // fallback remains for sources whose master is blocked by the CDN.
-        if (quality !== "720") {
-          setManifestLanguages(["fr", "vo"]);
-          return url;
-        }
-        // Keep the long-standing working path for 720p VF sources. Their video
-        // playlist is already playable as-is; attaching a second AAC rendition
-        // can leave some browsers stuck at 0:00.
-        if (audioLanguage === "fr") return videoPlaylist;
-        const synthetic = [
-          "#EXTM3U",
-          "#EXT-X-VERSION:3",
-          `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${audioName}",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="${audioCode}",URI="${audioPlaylist}"`,
-          `#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=${resolution},CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"`,
-          videoPlaylist,
-        ];
-        const manifestUrl = URL.createObjectURL(
-          new Blob([`${synthetic.join("\n")}\n`], {
-            type: "application/vnd.apple.mpegurl",
-          }),
-        );
-        temporaryManifests.push(manifestUrl);
-        setManifestLanguages(["fr", "vo"]);
-        return manifestUrl;
-      }
       try {
         const response = await fetch(url, {
           signal: controller.signal,
@@ -544,10 +495,19 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         );
         return variants[0]?.url || url;
       } catch (reason) {
-        if (reason?.name !== "AbortError")
+        if (reason?.name !== "AbortError") {
+          const quality =
+              String(item?.sourceName || "").match(
+                /\b(2160|1440|1080|720|480)p\b/i,
+              )?.[1] || "720",
+            fallbackPlaylist = /\/master\.m3u8(?:\?.*)?$/i.test(url)
+              ? new URL(`${quality}p/playlist.m3u8`, url).href
+              : url;
           setError(
-            `Impossible d'analyser le manifeste maître (${reason?.message || "erreur inconnue"}). Tentative directe…`,
+            `Impossible d'analyser le manifeste maître (${reason?.message || "erreur inconnue"}). Utilisation de la playlist ${quality}p de secours…`,
           );
+          return fallbackPlaylist;
+        }
         return url;
       }
     };
