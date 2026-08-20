@@ -1,0 +1,24 @@
+services:
+  api:
+    build: ./backend
+    container_name: alocine-api
+    restart: unless-stopped
+    volumes:
+      - ./backend/app:/app/app
+    ports:
+      - "8091:8000"
+    environment:
+      CORS_ORIGINS: http://localhost:5173
+
+  web:
+    build: ./frontend
+    container_name: alocine-react
+    restart: unless-stopped
+    volumes:
+      - ./frontend/src:/app/src
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8091
+    depends_on:
+      - api

@@ -1,0 +1,94 @@
+/* Scrollbar de l'historique, cohérente avec l'interface magique. */
+.history-modal>section,
+.history-list{
+  scrollbar-width:thin;
+  scrollbar-color:#b95cda #17131b;
+}
+
+.history-modal>section::-webkit-scrollbar,
+.history-list::-webkit-scrollbar{
+  width:10px;
+}
+
+.history-modal>section::-webkit-scrollbar-track,
+.history-list::-webkit-scrollbar-track{
+  margin-block:14px;
+  border-radius:999px;
+  background:#17131b;
+}
+
+.history-modal>section::-webkit-scrollbar-thumb,
+.history-list::-webkit-scrollbar-thumb{
+  min-height:48px;
+  border:2px solid #17131b;
+  border-radius:999px;
+  background:linear-gradient(180deg,#e08dff,#8d43a8);
+  box-shadow:0 0 12px #d978ff55;
+}
+
+.history-modal>section::-webkit-scrollbar-thumb:hover,
+.history-list::-webkit-scrollbar-thumb:hover{
+  background:linear-gradient(180deg,#edb2ff,#bd63dc);
+}
+
+@media (max-width:800px){
+  .account-modal.history-modal{
+    align-items:center;
+    justify-items:center;
+    padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));
+  }
+
+  .history-modal>section{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    max-height:calc(100dvh - max(24px,env(safe-area-inset-top)) - max(24px,env(safe-area-inset-bottom)));
+    padding:28px 18px 18px;
+    overflow:hidden;
+    border-radius:24px;
+  }
+
+  .history-modal h2{
+    margin:7px 48px 5px 0;
+  }
+
+  .history-modal .modal-close{
+    top:16px;
+    right:16px;
+    z-index:2;
+  }
+
+  .history-list{
+    min-height:0;
+    margin:18px -4px 0 0;
+    padding-right:4px;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-width:thin;
+    scrollbar-color:#d978ff55 transparent;
+  }
+
+  .history-list>button{
+    min-height:88px;
+    grid-template-columns:108px minmax(0,1fr);
+    border-color:#ffffff14;
+    background:linear-gradient(110deg,#09080b,#0d0a10);
+  }
+
+  .history-list img{
+    width:108px;
+    height:100%;
+    min-height:88px;
+  }
+
+  .history-list>button>div{
+    justify-content:center;
+    padding:11px 12px 10px 0;
+  }
+}
+
+@media (max-width:380px){
+  .history-modal>section{padding-inline:14px}
+  .history-list>button{grid-template-columns:94px minmax(0,1fr)}
+  .history-list img{width:94px}
+}

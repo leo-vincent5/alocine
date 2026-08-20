@@ -1,0 +1,48 @@
+# Variables d'environnement et secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Ressources et dépendances locales
+node_modules/
+.venv/
+venv/
+env/
+
+# Builds et caches frontend
+dist/
+build/
+.vite/
+.cache/
+coverage/
+
+# Python : bytecode, caches et outils
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Données locales du backend
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Journaux et fichiers temporaires
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Éditeurs et système
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
