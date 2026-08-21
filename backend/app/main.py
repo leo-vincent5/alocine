@@ -86,6 +86,7 @@ class ProgressRequest(BaseModel):
     title: str = Field(default="", max_length=250)
     episode_title: str = Field(default="", max_length=250)
     poster: str = Field(default="", max_length=2000)
+    media_type: Literal["movie", "tv"] = "tv"
     completed: bool = False
     skipped_auto: bool = False
 
@@ -100,6 +101,23 @@ class ProfileRequest(BaseModel):
 class SeriesSettingRequest(BaseModel):
     profile_id: int
     trigger_seconds: int = Field(default=10, ge=0, le=900)
+
+
+class FriendRequestBody(BaseModel):
+    user_id: int
+
+
+class FriendPermissionBody(BaseModel):
+    allowed: bool
+
+
+class RecommendationRequest(BaseModel):
+    friend_id: int
+    media_id: int
+    media_type: Literal["movie", "tv"] = "tv"
+    title: str = Field(min_length=1, max_length=250)
+    poster: str = Field(default="", max_length=2000)
+    message: str = Field(default="", max_length=500)
 
 
 def db() -> sqlite3.Connection:
@@ -181,6 +199,33 @@ def init_db() -> None:
             active INTEGER NOT NULL DEFAULT 1,
             created_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS friendships (
+            user_low INTEGER NOT NULL,
+            user_high INTEGER NOT NULL,
+            requested_by INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            share_low_history INTEGER NOT NULL DEFAULT 0,
+            share_high_history INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_low, user_high),
+            FOREIGN KEY (user_low) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_high) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER NOT NULL,
+            recipient_id INTEGER NOT NULL,
+            media_id INTEGER NOT NULL,
+            media_type TEXT NOT NULL DEFAULT 'tv',
+            title TEXT NOT NULL,
+            poster TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            seen INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+        );
         """)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(profiles)").fetchall()}
         if "language" not in columns:
@@ -192,13 +237,38 @@ def init_db() -> None:
             connection.execute("ALTER TABLE profile_progress ADD COLUMN completed INTEGER NOT NULL DEFAULT 0")
         if "skipped_auto" not in progress_columns:
             connection.execute("ALTER TABLE profile_progress ADD COLUMN skipped_auto INTEGER NOT NULL DEFAULT 0")
+        if "media_type" not in progress_columns:
+            connection.execute("ALTER TABLE profile_progress ADD COLUMN media_type TEXT NOT NULL DEFAULT 'tv'")
+        # Before media_type existed, movies used season/episode 1 and repeated
+        # the media title as their episode title. Recover those legacy rows.
+        connection.execute(
+            """UPDATE profile_progress SET media_type='movie'
+            WHERE media_type='tv' AND season=1 AND episode=1
+            AND trim(title)<>'' AND lower(trim(title))=lower(trim(episode_title))"""
+        )
         user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
         if "is_superadmin" not in user_columns:
             connection.execute("ALTER TABLE users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0")
         if "is_blocked" not in user_columns:
             connection.execute("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0")
+        if "invited_by" not in user_columns:
+            connection.execute("ALTER TABLE users ADD COLUMN invited_by INTEGER")
+        invitation_columns = {row[1] for row in connection.execute("PRAGMA table_info(invitations)").fetchall()}
+        if "created_by" not in invitation_columns:
+            connection.execute("ALTER TABLE invitations ADD COLUMN created_by INTEGER")
         if SUPERADMIN_EMAIL:
             connection.execute("UPDATE users SET is_superadmin=1 WHERE lower(email)=?", (SUPERADMIN_EMAIL,))
+            admin_row = connection.execute("SELECT id FROM users WHERE lower(email)=?", (SUPERADMIN_EMAIL,)).fetchone()
+            if admin_row:
+                connection.execute("UPDATE invitations SET created_by=? WHERE created_by IS NULL", (admin_row["id"],))
+                connection.execute(
+                    """UPDATE users SET invited_by=(
+                    SELECT i.created_by FROM invitations i
+                    WHERE lower(i.email)=lower(users.email) AND i.created_by IS NOT NULL
+                    ORDER BY i.created_at DESC LIMIT 1)
+                    WHERE invited_by IS NULL AND EXISTS(
+                    SELECT 1 FROM invitations i WHERE lower(i.email)=lower(users.email) AND i.created_by IS NOT NULL)"""
+                )
 
 
 init_db()
@@ -332,8 +402,32 @@ async def admin_access(_: dict[str, Any] = Depends(superadmin)) -> dict[str, Any
     with db() as connection:
         requests = [dict(row) for row in connection.execute("SELECT * FROM access_requests ORDER BY created_at DESC LIMIT 300").fetchall()]
         invitations = [dict(row) for row in connection.execute("SELECT * FROM invitations ORDER BY created_at DESC LIMIT 300").fetchall()]
-        users = [dict(row) for row in connection.execute("SELECT id,email,name,is_superadmin,is_blocked,created_at FROM users ORDER BY created_at DESC").fetchall()]
-    return {"requests": requests, "invitations": invitations, "users": users}
+        users = [dict(row) for row in connection.execute(
+            """SELECT u.id,u.email,u.name,u.is_superadmin,u.is_blocked,u.created_at,u.invited_by,
+            COALESCE(SUM(MIN(pp.position,CASE WHEN pp.duration>0 THEN pp.duration ELSE pp.position END)),0) watch_seconds,
+            COUNT(DISTINCT CASE WHEN pp.completed=1 AND pp.media_type='movie' THEN pp.media_id END) movies_completed,
+            COUNT(DISTINCT CASE WHEN pp.media_type='tv' THEN pp.media_id END) series_started,
+            COUNT(CASE WHEN pp.media_type='tv' AND (pp.position>0 OR pp.completed=1) THEN 1 END) episodes_started,
+            COUNT(CASE WHEN pp.completed=1 AND pp.media_type='tv' THEN 1 END) episodes_completed,
+            COUNT(CASE WHEN pp.completed=0 AND pp.media_type='tv' AND pp.position>0 THEN 1 END) episodes_in_progress,
+            COUNT(DISTINCT pp.media_id) titles_started,
+            COALESCE(MAX(pp.updated_at),0) last_activity,
+            (SELECT COUNT(*) FROM users child WHERE child.invited_by=u.id) referrals_count,
+            sponsor.name sponsor_name
+            FROM users u LEFT JOIN profiles p ON p.user_id=u.id
+            LEFT JOIN profile_progress pp ON pp.profile_id=p.id
+            LEFT JOIN users sponsor ON sponsor.id=u.invited_by
+            GROUP BY u.id ORDER BY u.created_at DESC"""
+        ).fetchall()]
+        dashboard = dict(connection.execute(
+            """SELECT COUNT(DISTINCT u.id) members,
+            COALESCE(SUM(MIN(pp.position,CASE WHEN pp.duration>0 THEN pp.duration ELSE pp.position END)),0) watch_seconds,
+            COUNT(DISTINCT CASE WHEN pp.completed=1 THEN CAST(pp.profile_id AS TEXT)||':'||CAST(pp.media_id AS TEXT) END) completed_titles,
+            COUNT(DISTINCT CASE WHEN pp.updated_at>? THEN pp.profile_id END) active_profiles_7d
+            FROM users u LEFT JOIN profiles p ON p.user_id=u.id LEFT JOIN profile_progress pp ON pp.profile_id=p.id""",
+            (int(time.time()) - 7 * 86400,),
+        ).fetchone())
+    return {"requests": requests, "invitations": invitations, "users": users, "dashboard": dashboard}
 
 
 def new_invitation_code() -> str:
@@ -477,14 +571,14 @@ async def invitation_delivery(invitation: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/admin/invitations")
-async def create_invitation(body: InvitationRequest, _: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
+async def create_invitation(body: InvitationRequest, admin: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
     email = body.email.strip().casefold() if body.email else None
     now = int(time.time())
     with db() as connection:
         while True:
             code = new_invitation_code()
             try:
-                cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at) VALUES(?,?,?,?,?)", (code, email, body.max_uses, now + body.expires_hours * 3600, now))
+                cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at,created_by) VALUES(?,?,?,?,?,?)", (code, email, body.max_uses, now + body.expires_hours * 3600, now, admin["id"]))
                 break
             except sqlite3.IntegrityError:
                 continue
@@ -494,14 +588,14 @@ async def create_invitation(body: InvitationRequest, _: dict[str, Any] = Depends
 
 
 @app.post("/api/admin/requests/{request_id}/approve")
-async def approve_request(request_id: int, _: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
+async def approve_request(request_id: int, admin: dict[str, Any] = Depends(superadmin)) -> dict[str, Any]:
     now = int(time.time())
     with db() as connection:
         request = connection.execute("SELECT * FROM access_requests WHERE id=?", (request_id,)).fetchone()
         if not request:
             raise HTTPException(status_code=404, detail="Demande introuvable")
         code = new_invitation_code()
-        cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at) VALUES(?,?,?,?,?)", (code, request["email"], 1, now + 7 * 86400, now))
+        cursor = connection.execute("INSERT INTO invitations(code,email,max_uses,expires_at,created_at,created_by) VALUES(?,?,?,?,?,?)", (code, request["email"], 1, now + 7 * 86400, now, admin["id"]))
         connection.execute("UPDATE access_requests SET status='approved',reviewed_at=? WHERE id=?", (now, request_id))
         invitation = connection.execute("SELECT * FROM invitations WHERE id=?", (cursor.lastrowid,)).fetchone()
     invitation_data = dict(invitation)
@@ -547,7 +641,7 @@ async def register(body: AuthRequest) -> dict[str, Any]:
             raise HTTPException(status_code=403, detail="Invitation invalide, expirée ou réservée à une autre adresse")
     try:
         with db() as connection:
-            cursor = connection.execute("INSERT INTO users(email,name,password_hash,created_at,is_superadmin) VALUES(?,?,?,?,?)", (email, name, hash_password(body.password), int(time.time()), int(email == SUPERADMIN_EMAIL)))
+            cursor = connection.execute("INSERT INTO users(email,name,password_hash,created_at,is_superadmin,invited_by) VALUES(?,?,?,?,?,?)", (email, name, hash_password(body.password), int(time.time()), int(email == SUPERADMIN_EMAIL), invitation["created_by"] if invitation else None))
             user_id = int(cursor.lastrowid)
             if invitation:
                 connection.execute("UPDATE invitations SET uses=uses+1,active=CASE WHEN uses+1>=max_uses THEN 0 ELSE active END WHERE id=?", (invitation["id"],))
@@ -598,17 +692,192 @@ async def update_profile(profile_id: int, body: ProfileRequest, user: dict[str, 
     return {"profile": {"id": profile_id, "name": body.name.strip(), "avatar": body.avatar, "language": body.language, "auto_next_seconds": body.auto_next_seconds}}
 
 
+def friendship_pair(first: int, second: int) -> tuple[int, int]:
+    return (first, second) if first < second else (second, first)
+
+
+def accepted_friendship(connection: sqlite3.Connection, first: int, second: int) -> sqlite3.Row | None:
+    low, high = friendship_pair(first, second)
+    return connection.execute(
+        "SELECT * FROM friendships WHERE user_low=? AND user_high=? AND status='accepted'",
+        (low, high),
+    ).fetchone()
+
+
+@app.get("/api/friends/search")
+async def search_friends(q: str = Query(..., min_length=2, max_length=100), user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    needle = q.strip().casefold()
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT id,name,email FROM users
+            WHERE id<>? AND is_blocked=0 AND (lower(email)=? OR lower(name) LIKE ?)
+            ORDER BY CASE WHEN lower(email)=? OR lower(name)=? THEN 0 ELSE 1 END,name LIMIT 20""",
+            (user["id"], needle, f"%{needle}%", needle, needle),
+        ).fetchall()
+        items = []
+        for row in rows:
+            low, high = friendship_pair(user["id"], row["id"])
+            relation = connection.execute(
+                "SELECT status,requested_by FROM friendships WHERE user_low=? AND user_high=?",
+                (low, high),
+            ).fetchone()
+            value = dict(row)
+            value["relation"] = relation["status"] if relation else None
+            value["incoming"] = bool(relation and relation["status"] == "pending" and relation["requested_by"] != user["id"])
+            items.append(value)
+    return {"items": items}
+
+
+@app.get("/api/friends")
+async def list_friends(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT f.*,
+            CASE WHEN f.user_low=? THEN high.id ELSE low.id END friend_id,
+            CASE WHEN f.user_low=? THEN high.name ELSE low.name END friend_name,
+            CASE WHEN f.user_low=? THEN high.email ELSE low.email END friend_email
+            FROM friendships f JOIN users low ON low.id=f.user_low JOIN users high ON high.id=f.user_high
+            WHERE f.user_low=? OR f.user_high=? ORDER BY f.updated_at DESC""",
+            (user["id"], user["id"], user["id"], user["id"], user["id"]),
+        ).fetchall()
+    items = []
+    for row in rows:
+        value = dict(row)
+        is_low = row["user_low"] == user["id"]
+        value["name"] = row["friend_name"]
+        value["email"] = row["friend_email"]
+        value["id"] = row["friend_id"]
+        value["incoming"] = row["status"] == "pending" and row["requested_by"] != user["id"]
+        value["share_my_history"] = bool(row["share_low_history"] if is_low else row["share_high_history"])
+        value["can_view_history"] = bool(row["share_high_history"] if is_low else row["share_low_history"])
+        for key in ("friend_id", "friend_name", "friend_email", "user_low", "user_high", "share_low_history", "share_high_history"):
+            value.pop(key, None)
+        items.append(value)
+    return {"items": items}
+
+
+@app.post("/api/friends/request")
+async def request_friend(body: FriendRequestBody, user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
+    if body.user_id == user["id"]:
+        raise HTTPException(status_code=422, detail="Vous ne pouvez pas vous ajouter vous-même")
+    low, high = friendship_pair(user["id"], body.user_id)
+    now = int(time.time())
+    with db() as connection:
+        target = connection.execute("SELECT id FROM users WHERE id=? AND is_blocked=0", (body.user_id,)).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+        existing = connection.execute("SELECT status FROM friendships WHERE user_low=? AND user_high=?", (low, high)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Une relation existe déjà avec cette personne")
+        connection.execute(
+            "INSERT INTO friendships(user_low,user_high,requested_by,status,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            (low, high, user["id"], "pending", now, now),
+        )
+    return {"status": "pending"}
+
+
+@app.post("/api/friends/{friend_id}/accept")
+async def accept_friend(friend_id: int, user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
+    low, high = friendship_pair(user["id"], friend_id)
+    with db() as connection:
+        cursor = connection.execute(
+            "UPDATE friendships SET status='accepted',updated_at=? WHERE user_low=? AND user_high=? AND status='pending' AND requested_by<>?",
+            (int(time.time()), low, high, user["id"]),
+        )
+        if not cursor.rowcount:
+            raise HTTPException(status_code=404, detail="Invitation introuvable")
+    return {"status": "accepted"}
+
+
+@app.delete("/api/friends/{friend_id}")
+async def remove_friend(friend_id: int, user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
+    low, high = friendship_pair(user["id"], friend_id)
+    with db() as connection:
+        cursor = connection.execute("DELETE FROM friendships WHERE user_low=? AND user_high=?", (low, high))
+        if not cursor.rowcount:
+            raise HTTPException(status_code=404, detail="Relation introuvable")
+    return {"status": "removed"}
+
+
+@app.put("/api/friends/{friend_id}/history-permission")
+async def update_friend_permission(friend_id: int, body: FriendPermissionBody, user: dict[str, Any] = Depends(current_user)) -> dict[str, bool]:
+    low, high = friendship_pair(user["id"], friend_id)
+    column = "share_low_history" if user["id"] == low else "share_high_history"
+    with db() as connection:
+        cursor = connection.execute(
+            f"UPDATE friendships SET {column}=?,updated_at=? WHERE user_low=? AND user_high=? AND status='accepted'",
+            (int(body.allowed), int(time.time()), low, high),
+        )
+        if not cursor.rowcount:
+            raise HTTPException(status_code=404, detail="Amitié introuvable")
+    return {"allowed": body.allowed}
+
+
+@app.get("/api/friends/{friend_id}/history")
+async def friend_history(friend_id: int, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    with db() as connection:
+        relation = accepted_friendship(connection, user["id"], friend_id)
+        if not relation:
+            raise HTTPException(status_code=404, detail="Amitié introuvable")
+        friend_is_low = relation["user_low"] == friend_id
+        allowed = relation["share_low_history"] if friend_is_low else relation["share_high_history"]
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Cet ami ne partage pas son historique")
+        rows = connection.execute(
+            """SELECT p.*,profiles.name profile_name FROM profile_progress p
+            JOIN profiles ON profiles.id=p.profile_id
+            JOIN (SELECT profile_id,media_id,MAX(updated_at) updated_at FROM profile_progress GROUP BY profile_id,media_id) latest
+            ON latest.profile_id=p.profile_id AND latest.media_id=p.media_id AND latest.updated_at=p.updated_at
+            WHERE profiles.user_id=? ORDER BY p.updated_at DESC LIMIT 100""",
+            (friend_id,),
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/api/recommendations")
+async def recommend_media(body: RecommendationRequest, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    with db() as connection:
+        if not accepted_friendship(connection, user["id"], body.friend_id):
+            raise HTTPException(status_code=403, detail="Cette personne n'est pas dans vos amis")
+        cursor = connection.execute(
+            "INSERT INTO recommendations(sender_id,recipient_id,media_id,media_type,title,poster,message,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (user["id"], body.friend_id, body.media_id, body.media_type, body.title.strip(), body.poster, body.message.strip(), int(time.time())),
+        )
+    return {"id": int(cursor.lastrowid), "status": "sent"}
+
+
+@app.get("/api/recommendations")
+async def list_recommendations(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    with db() as connection:
+        rows = connection.execute(
+            """SELECT r.*,u.name sender_name FROM recommendations r
+            JOIN users u ON u.id=r.sender_id WHERE r.recipient_id=? ORDER BY r.created_at DESC LIMIT 100""",
+            (user["id"],),
+        ).fetchall()
+        connection.execute("UPDATE recommendations SET seen=1 WHERE recipient_id=?", (user["id"],))
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.delete("/api/recommendations/{recommendation_id}")
+async def delete_recommendation(recommendation_id: int, user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
+    with db() as connection:
+        cursor = connection.execute("DELETE FROM recommendations WHERE id=? AND recipient_id=?", (recommendation_id, user["id"]))
+        if not cursor.rowcount:
+            raise HTTPException(status_code=404, detail="Recommandation introuvable")
+    return {"status": "removed"}
+
+
 @app.put("/api/progress")
 async def save_progress(body: ProgressRequest, user: dict[str, Any] = Depends(current_user)) -> dict[str, str]:
     with db() as connection:
         owns = connection.execute("SELECT 1 FROM profiles WHERE id=? AND user_id=?", (body.profile_id, user["id"])).fetchone()
         if not owns:
             raise HTTPException(status_code=403, detail="Profil invalide")
-        connection.execute("""INSERT INTO profile_progress(profile_id,media_id,season,episode,position,duration,title,episode_title,poster,updated_at,completed,skipped_auto)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id,media_id,season,episode) DO UPDATE SET
+        connection.execute("""INSERT INTO profile_progress(profile_id,media_id,season,episode,position,duration,title,episode_title,poster,updated_at,completed,skipped_auto,media_type)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id,media_id,season,episode) DO UPDATE SET
             position=excluded.position,duration=excluded.duration,title=excluded.title,episode_title=excluded.episode_title,poster=excluded.poster,updated_at=excluded.updated_at,
-            completed=MAX(profile_progress.completed,excluded.completed),skipped_auto=MAX(profile_progress.skipped_auto,excluded.skipped_auto)""",
-            (body.profile_id, body.media_id, body.season, body.episode, body.position, body.duration, body.title, body.episode_title, body.poster, int(time.time()), int(body.completed), int(body.skipped_auto)))
+            completed=MAX(profile_progress.completed,excluded.completed),skipped_auto=MAX(profile_progress.skipped_auto,excluded.skipped_auto),media_type=excluded.media_type""",
+            (body.profile_id, body.media_id, body.season, body.episode, body.position, body.duration, body.title, body.episode_title, body.poster, int(time.time()), int(body.completed), int(body.skipped_auto), body.media_type))
     return {"status": "saved"}
 
 

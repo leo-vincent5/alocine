@@ -8,6 +8,8 @@ import {
   Compass,
   History,
   Home,
+  Eye,
+  EyeOff,
   Info,
   Maximize,
   Minimize,
@@ -15,8 +17,11 @@ import {
   Plus,
   Search,
   Settings,
+  Send,
   Sparkles,
   Star,
+  UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import Hls from "hls.js";
@@ -43,6 +48,7 @@ import "./history-mobile.css";
 import "./series-slider.css";
 import "./explore.css";
 import "./access-control.css";
+import "./friends.css";
 
 const API = import.meta.env.VITE_API_URL ?? "";
 const PURSTREAM_API =
@@ -749,6 +755,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
           title: item.mediaTitle || item.title,
           episode_title: item.title || "",
           poster: item.poster || "",
+          media_type: episodes.length > 0 ? "tv" : "movie",
           completed: Boolean(overrides.completed),
           skipped_auto: Boolean(overrides.skipped_auto),
         }),
@@ -1345,7 +1352,16 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
   );
 }
 
-function Detail({ id, onBack, profile, onProfile, query, onQuery, onHistory }) {
+function Detail({
+  id,
+  onBack,
+  profile,
+  onProfile,
+  query,
+  onQuery,
+  onHistory,
+  onRecommend,
+}) {
   const [detail, setDetail] = useState(null),
     [season, setSeason] = useState(1),
     [language, setLanguage] = useState(
@@ -1585,7 +1601,18 @@ function Detail({ id, onBack, profile, onProfile, query, onQuery, onHistory }) {
               <Play fill="currentColor" />
               {resume ? "Reprendre" : "Regarder"}
             </button>
-            <button className="circle">
+            <button
+              className="circle"
+              title="Recommander à un ami"
+              onClick={() =>
+                onRecommend({
+                  media_id: Number(id),
+                  media_type: detail.isSeries ? "tv" : "movie",
+                  title: title(media),
+                  poster: media.posters?.large || image(media),
+                })
+              }
+            >
               <Plus />
             </button>
           </div>
@@ -1797,9 +1824,17 @@ function WhoWatching({ profiles, onSelect, onAdd, canClose = false, onClose }) {
   );
 }
 
-function ProfileMenu({ user, profile, onClose, onSwitch, onLogout, onUpdate }) {
+function ProfileMenu({
+  user,
+  profile,
+  onClose,
+  onSwitch,
+  onLogout,
+  onUpdate,
+  onFriends,
+  onAdmin,
+}) {
   const [editing, setEditing] = useState(false),
-    [admin, setAdmin] = useState(false),
     [avatar, setAvatar] = useState(profile?.avatar || 0),
     [language, setLanguage] = useState(profile?.language || "fr"),
     [autoNext, setAutoNext] = useState(profile?.auto_next_seconds ?? 10),
@@ -1821,7 +1856,6 @@ function ProfileMenu({ user, profile, onClose, onSwitch, onLogout, onUpdate }) {
       : Number(autoNext) < 60
         ? `${autoNext} s`
         : `${Math.floor(autoNext / 60)} min ${autoNext % 60 ? `${autoNext % 60} s` : ""}`;
-  if (admin) return <AdminPanel onClose={() => setAdmin(false)} />;
   return (
     <div
       className="account-modal"
@@ -1917,10 +1951,13 @@ function ProfileMenu({ user, profile, onClose, onSwitch, onLogout, onUpdate }) {
             <button className="profile-action" onClick={onSwitch}>
               Changer de profil
             </button>
+            <button className="profile-action" onClick={onFriends}>
+              <Users /> Mes amis
+            </button>
             {user?.is_superadmin && (
               <button
                 className="profile-action admin-action"
-                onClick={() => setAdmin(true)}
+                onClick={onAdmin}
               >
                 Administration
               </button>
@@ -2190,11 +2227,19 @@ function AdminPanel({ onClose }) {
       requests: [],
       invitations: [],
       users: [],
+      dashboard: {},
     }),
-    [tab, setTab] = useState("requests"),
+    [tab, setTab] = useState("dashboard"),
     [error, setError] = useState(""),
     [created, setCreated] = useState(""),
     [mailNotice, setMailNotice] = useState("");
+  const formatWatchTime = (seconds) => {
+    const total = Math.max(0, Number(seconds) || 0),
+      hours = Math.floor(total / 3600),
+      minutes = Math.floor((total % 3600) / 60);
+    if (hours >= 24) return `${Math.floor(hours / 24)} j ${hours % 24} h`;
+    return hours ? `${hours} h ${minutes} min` : `${minutes} min`;
+  };
   const token = localStorage.getItem("alocine_token"),
     headers = { Authorization: `Bearer ${token}` };
   const load = () =>
@@ -2258,6 +2303,7 @@ function AdminPanel({ onClose }) {
       </header>
       <nav>
         {[
+          ["dashboard", "Tableau de bord"],
           ["requests", "Demandes"],
           ["invitations", "Invitations"],
           ["users", "Membres"],
@@ -2268,7 +2314,7 @@ function AdminPanel({ onClose }) {
             key={id}
           >
             {label}
-            <b>{data[id]?.length || 0}</b>
+            {id !== "dashboard" && <b>{data[id]?.length || 0}</b>}
           </button>
         ))}
       </nav>
@@ -2283,6 +2329,61 @@ function AdminPanel({ onClose }) {
         </div>
       )}
       <main>
+        {tab === "dashboard" && (
+          <div className="admin-dashboard">
+            <div className="admin-kpis">
+              <article>
+                <Users />
+                <span>Membres inscrits</span>
+                <strong>{data.dashboard?.members || 0}</strong>
+              </article>
+              <article>
+                <Clock />
+                <span>Temps de visionnage</span>
+                <strong>{formatWatchTime(data.dashboard?.watch_seconds)}</strong>
+              </article>
+              <article>
+                <Play />
+                <span>Titres terminés</span>
+                <strong>{data.dashboard?.completed_titles || 0}</strong>
+              </article>
+              <article>
+                <Sparkles />
+                <span>Actifs sur 7 jours</span>
+                <strong>{data.dashboard?.active_profiles_7d || 0}</strong>
+              </article>
+            </div>
+            <div className="admin-leaderboard">
+              <div className="admin-dashboard-title">
+                <div><small>CARTE DU MARAUDEUR</small><h2>Activité des membres</h2></div>
+                <span>{data.users.length} sorcier{data.users.length > 1 ? "s" : ""}</span>
+              </div>
+              <div className="admin-member-grid">
+                {[...data.users]
+                  .sort((a, b) => Number(b.watch_seconds) - Number(a.watch_seconds))
+                  .map((item, index) => (
+                    <article className="admin-member-card" key={item.id}>
+                      <div className="admin-member-rank">#{index + 1}</div>
+                      <div className="admin-member-identity">
+                        <i>{item.name?.[0]?.toUpperCase()}</i>
+                        <div><strong>{item.name}</strong><span>{item.email}</span></div>
+                      </div>
+                      <div className="admin-member-stats">
+                        <div><b>{formatWatchTime(item.watch_seconds)}</b><span>regardées</span></div>
+                        <div><b>{item.movies_completed || 0}</b><span>films terminés</span></div>
+                        <div><b>{item.episodes_completed || 0}</b><span>épisodes terminés</span></div>
+                        <div><b>{item.episodes_in_progress || 0}</b><span>épisodes en cours</span></div>
+                      </div>
+                      <div className="admin-member-foot">
+                        <span><UserPlus /> {item.referrals_count || 0} filleul{item.referrals_count > 1 ? "s" : ""} · {item.series_started || 0} série{item.series_started > 1 ? "s" : ""} suivie{item.series_started > 1 ? "s" : ""}</span>
+                        <span>{item.last_activity ? `Actif le ${new Date(item.last_activity * 1000).toLocaleDateString("fr-FR")}` : "Aucune lecture"}</span>
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
         {tab === "requests" && (
           <div className="admin-list">
             {data.requests.map((item) => (
@@ -2385,6 +2486,14 @@ function AdminPanel({ onClose }) {
                         ? "Bloqué"
                         : "Membre actif"}
                   </small>
+                  <div className="admin-user-metrics">
+                    <span>{formatWatchTime(item.watch_seconds)} regardées</span>
+                    <span>{item.movies_completed || 0} films</span>
+                    <span>{item.episodes_completed || 0} épisodes terminés</span>
+                    <span>{item.episodes_in_progress || 0} épisodes en cours</span>
+                    <span>{item.series_started || 0} séries suivies</span>
+                    <span>{item.referrals_count || 0} filleuls</span>
+                  </div>
                 </div>
                 {!item.is_superadmin && (
                   <button
@@ -2403,6 +2512,246 @@ function AdminPanel({ onClose }) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function FriendsModal({ onClose, onSelect }) {
+  const [friends, setFriends] = useState([]),
+    [recommendations, setRecommendations] = useState([]),
+    [results, setResults] = useState([]),
+    [query, setQuery] = useState(""),
+    [friendHistory, setFriendHistory] = useState(null),
+    [message, setMessage] = useState(""),
+    [loading, setLoading] = useState(true);
+  const token = localStorage.getItem("alocine_token"),
+    api = async (path, options = {}) => {
+      const response = await fetch(`${API}${path}`, {
+        ...options,
+        headers: {
+          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      });
+      const value = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(value.detail || "Opération impossible");
+      return value;
+    };
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const [friendData, recommendationData] = await Promise.all([
+        api("/api/friends"),
+        api("/api/recommendations"),
+      ]);
+      setFriends(friendData.items || []);
+      setRecommendations(recommendationData.items || []);
+    } catch (reason) {
+      setMessage(reason.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    refresh();
+  }, []);
+  const search = async (event) => {
+    event.preventDefault();
+    if (query.trim().length < 2) return;
+    setMessage("");
+    try {
+      const value = await api(
+        `/api/friends/search?q=${encodeURIComponent(query.trim())}`,
+      );
+      setResults(value.items || []);
+    } catch (reason) {
+      setMessage(reason.message);
+    }
+  };
+  const action = async (path, options) => {
+    setMessage("");
+    try {
+      await api(path, options);
+      setResults([]);
+      await refresh();
+    } catch (reason) {
+      setMessage(reason.message);
+    }
+  };
+  const showHistory = async (friend) => {
+    setMessage("");
+    try {
+      const value = await api(`/api/friends/${friend.id}/history`);
+      setFriendHistory({ friend, items: value.items || [] });
+    } catch (reason) {
+      setMessage(reason.message);
+    }
+  };
+  const accepted = friends.filter((friend) => friend.status === "accepted"),
+    pending = friends.filter((friend) => friend.status === "pending");
+  return (
+    <div
+      className="account-modal friends-modal"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section>
+        <button className="modal-close" onClick={onClose}>
+          <X />
+        </button>
+        <small>RÉSEAU DES SORCIERS</small>
+        <h2>Mes amis</h2>
+        <p className="friends-intro">
+          Retrouvez vos proches, partagez vos découvertes et choisissez qui
+          peut consulter votre historique.
+        </p>
+        <form className="friend-search" onSubmit={search}>
+          <Search />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Email ou pseudo…"
+          />
+          <button>Rechercher</button>
+        </form>
+        {message && <p className="friends-message">{message}</p>}
+        {results.length > 0 && (
+          <div className="friend-results">
+            {results.map((person) => (
+              <article key={person.id}>
+                <div className="friend-initial">{person.name[0]}</div>
+                <div>
+                  <strong>{person.name}</strong>
+                  <span>{person.email}</span>
+                </div>
+                <button
+                  disabled={Boolean(person.relation)}
+                  onClick={() =>
+                    action("/api/friends/request", {
+                      method: "POST",
+                      body: JSON.stringify({ user_id: person.id }),
+                    })
+                  }
+                >
+                  <UserPlus /> {person.relation ? "Déjà invité" : "Ajouter"}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+        {loading ? (
+          <div className="friends-empty"><Sparkles className="spin" /> Chargement…</div>
+        ) : (
+          <div className="friends-scroll">
+            {pending.length > 0 && (
+              <div className="friends-section">
+                <h3>Invitations</h3>
+                {pending.map((friend) => (
+                  <article className="friend-card pending" key={friend.id}>
+                    <div className="friend-initial">{friend.name[0]}</div>
+                    <div><strong>{friend.name}</strong><span>{friend.incoming ? "Souhaite devenir votre ami" : "Invitation envoyée"}</span></div>
+                    <div className="friend-card-actions">
+                      {friend.incoming && (
+                        <button onClick={() => action(`/api/friends/${friend.id}/accept`, { method: "POST" })}>Accepter</button>
+                      )}
+                      <button onClick={() => action(`/api/friends/${friend.id}`, { method: "DELETE" })}>{friend.incoming ? "Refuser" : "Annuler"}</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            <div className="friends-section">
+              <h3>Amis ({accepted.length})</h3>
+              {accepted.length ? accepted.map((friend) => (
+                <article className="friend-card" key={friend.id}>
+                  <div className="friend-initial">{friend.name[0]}</div>
+                  <div className="friend-main">
+                    <strong>{friend.name}</strong><span>{friend.email}</span>
+                    <label className="history-permission">
+                      <input type="checkbox" checked={friend.share_my_history} onChange={(event) => action(`/api/friends/${friend.id}/history-permission`, { method: "PUT", body: JSON.stringify({ allowed: event.target.checked }) })} />
+                      {friend.share_my_history ? <Eye /> : <EyeOff />}
+                      Autoriser mon historique
+                    </label>
+                  </div>
+                  <div className="friend-card-actions">
+                    <button disabled={!friend.can_view_history} onClick={() => showHistory(friend)}>Voir l’historique</button>
+                    <button className="danger" onClick={() => action(`/api/friends/${friend.id}`, { method: "DELETE" })}>Retirer</button>
+                  </div>
+                </article>
+              )) : <div className="friends-empty">Aucun ami pour le moment.</div>}
+            </div>
+            <div className="friends-section recommendations-section">
+              <h3>Recommandations reçues ({recommendations.length})</h3>
+              {recommendations.map((item) => (
+                <article key={item.id} className="recommendation-card">
+                  <img src={item.poster || fallback} alt="" />
+                  <button onClick={() => onSelect(item.media_id)}>
+                    <small>{item.sender_name} vous recommande</small>
+                    <strong>{item.title}</strong>
+                    {item.message && <span>« {item.message} »</span>}
+                  </button>
+                  <button className="recommendation-delete" onClick={() => action(`/api/recommendations/${item.id}`, { method: "DELETE" })}><X /></button>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+        {friendHistory && (
+          <div className="friend-history-panel">
+            <button onClick={() => setFriendHistory(null)}><ArrowLeft /> Retour</button>
+            <h3>Historique de {friendHistory.friend.name}</h3>
+            {friendHistory.items.length ? friendHistory.items.map((item) => (
+              <button key={`${item.profile_id}-${item.media_id}`} onClick={() => onSelect(item.media_id)}>
+                <img src={item.poster || fallback} alt="" />
+                <div><strong>{item.title}</strong><span>{item.profile_name} · S{item.season} E{item.episode}</span></div>
+              </button>
+            )) : <div className="friends-empty">Aucun historique partagé.</div>}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RecommendModal({ media, onClose }) {
+  const [friends, setFriends] = useState([]),
+    [selected, setSelected] = useState(null),
+    [message, setMessage] = useState(""),
+    [status, setStatus] = useState("");
+  useEffect(() => {
+    const token = localStorage.getItem("alocine_token");
+    fetch(`${API}/api/friends`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => response.json())
+      .then((value) => setFriends((value.items || []).filter((item) => item.status === "accepted")));
+  }, []);
+  const send = async () => {
+    if (!selected) return;
+    const token = localStorage.getItem("alocine_token"),
+      response = await fetch(`${API}/api/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...media, friend_id: selected, message }),
+      }),
+      value = await response.json().catch(() => ({}));
+    if (!response.ok) return setStatus(value.detail || "Envoi impossible");
+    setStatus("Le hibou a livré votre recommandation ✨");
+    setTimeout(onClose, 900);
+  };
+  return (
+    <div className="account-modal recommend-modal" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section>
+        <button className="modal-close" onClick={onClose}><X /></button>
+        <Send />
+        <small>HIBOU EXPRESS</small><h2>Recommander</h2>
+        <div className="recommend-media"><img src={media.poster || fallback} alt="" /><strong>{media.title}</strong></div>
+        <div className="recommend-friends">
+          {friends.map((friend) => <button className={selected === friend.id ? "selected" : ""} onClick={() => setSelected(friend.id)} key={friend.id}><span>{friend.name[0]}</span>{friend.name}</button>)}
+        </div>
+        {!friends.length && <p>Ajoutez d’abord un ami pour lui recommander ce titre.</p>}
+        <textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength="500" placeholder="Ajouter un petit message…" />
+        {status && <p className="friends-message">{status}</p>}
+        <button className="recommend-send" disabled={!selected} onClick={send}>Envoyer la recommandation</button>
+      </section>
     </div>
   );
 }
@@ -2759,6 +3108,8 @@ function App() {
     [profile, setProfile] = useState(null),
     [authOpen, setAuthOpen] = useState(false),
     [historyOpen, setHistoryOpen] = useState(false),
+    [friendsOpen, setFriendsOpen] = useState(false),
+    [recommendMedia, setRecommendMedia] = useState(null),
     [profileOpen, setProfileOpen] = useState(false),
     [watchOpen, setWatchOpen] = useState(false),
     [adminOpen, setAdminOpen] = useState(false);
@@ -2973,6 +3324,7 @@ function App() {
       </div>
     );
   if (inviteOnly && !user) return <AccessGate onAuthenticated={setUser} />;
+  if (adminOpen) return <AdminPanel onClose={() => setAdminOpen(false)} />;
   if (mediaId)
     return (
       <>
@@ -2985,6 +3337,9 @@ function App() {
           onQuery={setQuery}
           onHistory={() =>
             user && profile ? setHistoryOpen(true) : setAuthOpen(true)
+          }
+          onRecommend={(media) =>
+            user ? setRecommendMedia(media) : setAuthOpen(true)
           }
         />
         <SearchResultsModal
@@ -3012,6 +3367,14 @@ function App() {
             }}
             onLogout={logout}
             onUpdate={updateProfile}
+            onFriends={() => {
+              setProfileOpen(false);
+              setFriendsOpen(true);
+            }}
+            onAdmin={() => {
+              setProfileOpen(false);
+              setAdminOpen(true);
+            }}
           />
         )}{" "}
         {watchOpen && (
@@ -3031,6 +3394,21 @@ function App() {
               setHistoryOpen(false);
               openDetail({ id });
             }}
+          />
+        )}
+        {friendsOpen && (
+          <FriendsModal
+            onClose={() => setFriendsOpen(false)}
+            onSelect={(id) => {
+              setFriendsOpen(false);
+              openDetail({ id });
+            }}
+          />
+        )}
+        {recommendMedia && (
+          <RecommendModal
+            media={recommendMedia}
+            onClose={() => setRecommendMedia(null)}
           />
         )}
       </>
@@ -3078,6 +3456,14 @@ function App() {
             }}
             onLogout={logout}
             onUpdate={updateProfile}
+            onFriends={() => {
+              setProfileOpen(false);
+              setFriendsOpen(true);
+            }}
+            onAdmin={() => {
+              setProfileOpen(false);
+              setAdminOpen(true);
+            }}
           />
         )}{" "}
         {historyOpen && profile && (
@@ -3086,6 +3472,15 @@ function App() {
             onClose={() => setHistoryOpen(false)}
             onSelect={(id) => {
               setHistoryOpen(false);
+              openDetail({ id });
+            }}
+          />
+        )}
+        {friendsOpen && (
+          <FriendsModal
+            onClose={() => setFriendsOpen(false)}
+            onSelect={(id) => {
+              setFriendsOpen(false);
               openDetail({ id });
             }}
           />
@@ -3133,6 +3528,10 @@ function App() {
             <History />
             Historique
           </button>
+          <button onClick={() => (user ? setFriendsOpen(true) : setAuthOpen(true))}>
+            <Users />
+            Amis
+          </button>
         </nav>
         <label className="search">
           <Search />
@@ -3157,6 +3556,13 @@ function App() {
           }
         >
           <History />
+        </button>
+        <button
+          className="mobile-friends"
+          title="Amis"
+          onClick={() => (user ? setFriendsOpen(true) : setAuthOpen(true))}
+        >
+          <Users />
         </button>
         <button
           className="avatar"
@@ -3307,6 +3713,14 @@ function App() {
           }}
           onLogout={logout}
           onUpdate={updateProfile}
+          onFriends={() => {
+            setProfileOpen(false);
+            setFriendsOpen(true);
+          }}
+          onAdmin={() => {
+            setProfileOpen(false);
+            setAdminOpen(true);
+          }}
         />
       )}
       {watchOpen && (
@@ -3324,6 +3738,15 @@ function App() {
           onClose={() => setHistoryOpen(false)}
           onSelect={(id) => {
             setHistoryOpen(false);
+            openDetail({ id });
+          }}
+        />
+      )}
+      {friendsOpen && (
+        <FriendsModal
+          onClose={() => setFriendsOpen(false)}
+          onSelect={(id) => {
+            setFriendsOpen(false);
             openDetail({ id });
           }}
         />
