@@ -243,6 +243,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     retryRef = useRef(null),
     saveRef = useRef(0),
     progressSaveRef = useRef(() => {}),
+    externalVisitRef = useRef({ waiting: false, hidden: false }),
     triggerRef = useRef(10),
     skipAutoRef = useRef(false),
     restoreFullscreenRef = useRef(false);
@@ -258,11 +259,38 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
     [triggerSeconds, setTriggerSeconds] = useState(10),
     [settingValue, setSettingValue] = useState(10),
     [settingSaved, setSettingSaved] = useState(false),
+    [externalPrompt, setExternalPrompt] = useState(null),
+    [externalTime, setExternalTime] = useState(""),
+    [externalTimeError, setExternalTimeError] = useState(""),
     [fullscreen, setFullscreen] = useState(false);
   useEffect(
-    () => setAudioLanguage(item?.playbackLanguage || "fr"),
+    () => {
+      setAudioLanguage(item?.playbackLanguage || "fr");
+      setExternalPrompt(null);
+      setExternalTime("");
+      externalVisitRef.current = { waiting: false, hidden: false };
+    },
     [item?.key],
   );
+  useEffect(() => {
+    const trackExternalVisit = () => {
+      const visit = externalVisitRef.current;
+      if (!visit.waiting) return;
+      if (document.visibilityState === "hidden") {
+        visit.hidden = true;
+        return;
+      }
+      if (visit.hidden) {
+        externalVisitRef.current = { waiting: false, hidden: false };
+        setExternalTime("");
+        setExternalTimeError("");
+        setExternalPrompt({ stage: "return" });
+      }
+    };
+    document.addEventListener("visibilitychange", trackExternalVisit);
+    return () =>
+      document.removeEventListener("visibilitychange", trackExternalVisit);
+  }, []);
   useEffect(() => {
     const changed = () =>
       setFullscreen(
@@ -985,14 +1013,7 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       if (!externalSource) return [];
       try {
         const source = new URL(externalSource),
-          links = [
-            {
-              label: /\/master\.m3u8(?:\?.*)?$/i.test(source.href)
-                ? "Master"
-                : "Source",
-              url: source.href,
-            },
-          ];
+          links = [];
         if (/\.m3u8(?:\?.*)?$/i.test(source.href)) {
           const base = /\/master\.m3u8(?:\?.*)?$/i.test(source.href)
             ? source
@@ -1013,6 +1034,12 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
               url: new URL("hd/1080p/playlist.m3u8", base).href,
             });
         }
+        links.push({
+          label: /\/master\.m3u8(?:\?.*)?$/i.test(source.href)
+            ? "Master"
+            : "Source",
+          url: source.href,
+        });
         return links.filter(
           ({ url }, index, values) =>
             values.findIndex((entry) => entry.url === url) === index,
@@ -1021,6 +1048,65 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         return [];
       }
     })();
+  const formatExternalTime = (seconds) => {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0)),
+      hours = Math.floor(value / 3600),
+      minutes = Math.floor((value % 3600) / 60),
+      remaining = value % 60,
+      paddedMinutes = String(minutes).padStart(2, "0"),
+      paddedSeconds = String(remaining).padStart(2, "0");
+    return hours
+      ? hours + ":" + paddedMinutes + ":" + paddedSeconds
+      : minutes + ":" + paddedSeconds;
+  };
+  const parseExternalTime = (value) => {
+    const clean = String(value || "").trim();
+    if (!clean) return null;
+    const parts = clean.split(":");
+    if (parts.length > 3 || parts.some((part) => !/^\d+$/.test(part)))
+      return null;
+    if (parts.length === 1) return Number(parts[0]) * 60;
+    return parts
+      .map(Number)
+      .reverse()
+      .reduce((total, part, index) => total + part * 60 ** index, 0);
+  };
+  const launchExternalSource = (link) => {
+    setExternalPrompt(null);
+    externalVisitRef.current = { waiting: true, hidden: false };
+    window.open(link.url, "_blank", "noopener,noreferrer");
+  };
+  const requestExternalSource = (link) => {
+    const saved = Number(
+      item.resumePosition ??
+        localStorage.getItem(`alocine_resume_${item.key}`) ??
+        0,
+    );
+    if (saved > 0) {
+      setExternalPrompt({ stage: "resume", link, saved });
+      return;
+    }
+    launchExternalSource(link);
+  };
+  const saveExternalProgress = () => {
+    const position = parseExternalTime(externalTime);
+    if (position === null) {
+      setExternalTimeError("Indiquez un temps comme 10:20 ou 1:10:20.");
+      return;
+    }
+    progressSaveRef.current({ position });
+    setExternalPrompt(null);
+    setExternalTimeError("");
+  };
+  const completeExternalPlayback = () => {
+    progressSaveRef.current({
+      completed: true,
+      position: videoRef.current?.duration || 0,
+    });
+    setExternalPrompt(null);
+    const next = episodes[item.index + 1];
+    if (next) onPlayEpisode(next);
+  };
   return (
     <div
       className="player-modal"
@@ -1060,18 +1146,89 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
         {error && <p className="player-error">{error}</p>}
         {externalLinks.length > 0 && (
           <div className="external-source-links">
-            <span>Ouvrir directement</span>
+            <span>
+              Ouvrir directement · {audioLanguage === "vo" ? "VO" : "VF"}
+            </span>
             <div>
               {externalLinks.map((link) => (
-                <a
+                <button
                   key={link.url}
-                  href={link.url}
-                  target="_blank"
-                  rel="noreferrer"
+                  type="button"
+                  onClick={() => requestExternalSource(link)}
                 >
                   {link.label}
-                </a>
+                </button>
               ))}
+            </div>
+          </div>
+        )}
+        {externalPrompt && (
+          <div className="external-progress-overlay">
+            <div className="external-progress-card">
+              <button
+                className="external-progress-close"
+                onClick={() => setExternalPrompt(null)}
+                aria-label="Fermer"
+              >
+                <X />
+              </button>
+              {externalPrompt.stage === "resume" ? (
+                <>
+                  <Sparkles />
+                  <small>REPRISE DE LA LECTURE</small>
+                  <h4>Vous aviez déjà commencé</h4>
+                  <p>
+                    Dans le lecteur externe, avancez jusqu’à{" "}
+                    <strong>{formatExternalTime(externalPrompt.saved)}</strong>{" "}
+                    pour reprendre là où vous en étiez.
+                  </p>
+                  <button
+                    className="external-progress-primary"
+                    onClick={() => launchExternalSource(externalPrompt.link)}
+                  >
+                    Ouvrir et reprendre
+                  </button>
+                  <button onClick={() => setExternalPrompt(null)}>
+                    Annuler
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Clock />
+                  <small>RETOUR DE LECTURE</small>
+                  <h4>Où vous êtes-vous arrêté ?</h4>
+                  <p>
+                    Nous ne pouvons pas lire automatiquement la position de
+                    l’autre onglet. Indiquez-la pour mettre à jour l’historique.
+                  </p>
+                  <label>
+                    Temps de pause
+                    <input
+                      value={externalTime}
+                      onChange={(event) => {
+                        setExternalTime(event.target.value);
+                        setExternalTimeError("");
+                      }}
+                      placeholder="10:20"
+                      inputMode="numeric"
+                      autoFocus
+                    />
+                  </label>
+                  {externalTimeError && (
+                    <p className="external-time-error">{externalTimeError}</p>
+                  )}
+                  <button
+                    className="external-progress-primary"
+                    onClick={saveExternalProgress}
+                  >
+                    Enregistrer ma progression
+                  </button>
+                  <button onClick={completeExternalPlayback}>
+                    ✓ Lecture terminée
+                    {episodes[item.index + 1] ? " · Épisode suivant" : ""}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
