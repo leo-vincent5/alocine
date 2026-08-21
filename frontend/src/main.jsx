@@ -979,6 +979,48 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
       ...manifestLanguages,
     ]),
   ];
+  const externalSource =
+      item?.sources?.[audioLanguage] || item?.url || "",
+    externalLinks = (() => {
+      if (!externalSource) return [];
+      try {
+        const source = new URL(externalSource),
+          links = [
+            {
+              label: /\/master\.m3u8(?:\?.*)?$/i.test(source.href)
+                ? "Master"
+                : "Source",
+              url: source.href,
+            },
+          ];
+        if (/\.m3u8(?:\?.*)?$/i.test(source.href)) {
+          const base = /\/master\.m3u8(?:\?.*)?$/i.test(source.href)
+            ? source
+            : new URL("../master.m3u8", source);
+          links.push(
+            {
+              label: "720p",
+              url: new URL("720p/playlist.m3u8", base).href,
+            },
+            {
+              label: "1080p",
+              url: new URL("1080p/playlist.m3u8", base).href,
+            },
+          );
+          if (!/\/hd\/master\.m3u8(?:\?.*)?$/i.test(base.href))
+            links.push({
+              label: "HD 1080p",
+              url: new URL("hd/1080p/playlist.m3u8", base).href,
+            });
+        }
+        return links.filter(
+          ({ url }, index, values) =>
+            values.findIndex((entry) => entry.url === url) === index,
+        );
+      } catch {
+        return [];
+      }
+    })();
   return (
     <div
       className="player-modal"
@@ -1016,6 +1058,23 @@ function Player({ item, episodes, onPlayEpisode, onClose }) {
           referrerPolicy="no-referrer"
         />
         {error && <p className="player-error">{error}</p>}
+        {externalLinks.length > 0 && (
+          <div className="external-source-links">
+            <span>Ouvrir directement</span>
+            <div>
+              {externalLinks.map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
         {settingsOpen && (
           <div className="next-settings">
             <button
